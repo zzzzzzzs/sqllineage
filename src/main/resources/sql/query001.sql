@@ -6,6 +6,6 @@ from (
                   from (
                            select age, name, class, grade, gender
                            from data1
-                       )
-              ) t1
-)t2;
+                       ) t1
+              ) t2
+     ) t3;

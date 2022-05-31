@@ -5,7 +5,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.zzzzzzzs.sqllineage.bean.ColumnInfo;
 import com.zzzzzzzs.sqllineage.bean.SqlJson;
+import com.zzzzzzzs.sqllineage.bean.TableInfo;
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.avatica.util.Quoting;
 import org.apache.calcite.schema.SchemaPlus;
@@ -16,6 +18,8 @@ import org.apache.calcite.sql.parser.impl.SqlParserImpl;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
 
+import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 
 public class ParseSql {
@@ -42,7 +46,7 @@ public class ParseSql {
   // parse select
   public String parseSelect(String sql) throws SqlParseException {
     if (sql == null || sql.isEmpty()) {
-      FileReader fileReader = new FileReader("./sql/query001.sql");
+      FileReader fileReader = new FileReader("./sql/query002.sql");
       sql = fileReader.readString();
     }
     sql = sql.trim();
@@ -51,32 +55,32 @@ public class ParseSql {
     }
     SqlParser parser = SqlParser.create(sql, config.getParserConfig());
     SqlNode sqlNode = parser.parseStmt();
-    // 然后解析出来的sqlNode中的属性就可以了
-    // TODO 最外层的表先给null，后面再改
-    handlerSql(sqlNode, null);
+    List<TableInfo> tableInfos = new ArrayList<>();
+    // 默认真实名字
+    handlerSql(sqlNode, tableInfos, 1);
     String res = SqlJson.res.replace("$nodes", sqlNodes.toString());
     sqlNodes.removeAll();
     System.out.println(res);
+    System.out.println("tableInfos" + tableInfos);
     return res;
   }
 
   // handle sqlnode
-  private String handlerSql(SqlNode sqlNode, String tableName) {
-    String res = null;
-    if (sqlNode == null) return null;
+  private void handlerSql(SqlNode sqlNode, List<TableInfo> tableInfos, int flag) {
+    if (sqlNode == null) return;
     SqlKind kind = sqlNode.getKind();
     switch (kind) {
       case INSERT:
         handlerInsert(sqlNode);
         break;
       case SELECT:
-        handlerSelect(sqlNode);
+        handlerSelect(sqlNode, tableInfos);
         break;
       case JOIN:
-        handlerJoin(sqlNode);
+        handlerJoin(sqlNode, tableInfos);
         break;
       case AS:
-        res = handlerAs(sqlNode);
+        handlerAs(sqlNode, tableInfos);
         break;
       case UNION:
         break;
@@ -87,15 +91,16 @@ public class ParseSql {
         //        hanlderWith(sqlNode);
         break;
       case IDENTIFIER:
-        res = handlerIdentifier(sqlNode);
+        // 表名
+        handlerIdentifier(sqlNode, tableInfos, flag);
         break;
       case OTHER:
-        handlerOther(sqlNode, tableName);
+        // 列名
+        handlerOther(sqlNode, tableInfos);
         break;
       default:
         break;
     }
-    return res;
   }
 
   //  private void handlerIdentifier(SqlNode sqlNode) {
@@ -127,38 +132,38 @@ public class ParseSql {
   //  }
 
   // handle join
-  private void handlerJoin(SqlNode sqlNode) {
+  private void handlerJoin(SqlNode sqlNode, List<TableInfo> tableInfos) {
     SqlJoin join = (SqlJoin) sqlNode;
     SqlNode left = join.getLeft();
     SqlNode right = join.getRight();
-    handlerSql(left, null);
-    handlerSql(right, null);
+    handlerSql(left, tableInfos, 1);
+    handlerSql(right, tableInfos, 1);
   }
 
   // handle select
-  private void handlerSelect(SqlNode sqlNode) {
+  private void handlerSelect(SqlNode sqlNode, List<TableInfo> tableInfos) {
     SqlSelect select = (SqlSelect) sqlNode;
     SqlNode from = select.getFrom();
-    String fromTable = handlerSql(from, null);
+    handlerSql(from, tableInfos, 1);
     SqlNode selectList = select.getSelectList();
-    handlerSql(selectList, fromTable);
+    handlerSql(selectList, tableInfos, 1);
     SqlNode where = select.getWhere();
-    handlerSql(where, null);
+    handlerSql(where, null, 1);
     SqlNode groupBy = select.getGroup();
-    handlerSql(groupBy, null);
+    handlerSql(groupBy, null, 1);
     SqlNode having = select.getHaving();
-    handlerSql(having, null);
+    handlerSql(having, null, 1);
     SqlNodeList orderList = select.getOrderList();
-    handlerSql(orderList, null);
+    handlerSql(orderList, null, 1);
   }
 
   // handle insert
   private void handlerInsert(SqlNode sqlNode) {
     SqlInsert sqlInsert = (SqlInsert) sqlNode;
     SqlNode insertList = sqlInsert.getTargetTable();
-    handlerSql(insertList, null);
+    handlerSql(insertList, null, 1);
     SqlNode source = sqlInsert.getSource();
-    handlerSql(source, null);
+    handlerSql(source, null, 1);
   }
 
   //  private void hanlerTable(SqlNode sqlNode) {
@@ -319,47 +324,64 @@ public class ParseSql {
   //    handlerSql(right);
   //  }
   //
-  private String handlerAs(SqlNode sqlNode) {
+  private void handlerAs(SqlNode sqlNode, List<TableInfo> tableInfos) {
     SqlBasicCall sqlBasicCall = (SqlBasicCall) sqlNode;
     List<SqlNode> operandList = sqlBasicCall.getOperandList();
+    TableInfo tableInfo =
+        TableInfo.builder()
+            .tableName(new String())
+            .alias(new String())
+            .columns(new ArrayList<>())
+            .build();
+    tableInfos.add(tableInfo);
     SqlNode left = operandList.get(0);
-    handlerSql(left, null);
+    handlerSql(left, tableInfos, 1);
     SqlNode right = operandList.get(1);
-    return handlerSql(right, right.toString());
+    handlerSql(right, tableInfos, 2);
   }
 
   // 目前看起来是列名
-  private void handlerOther(SqlNode sqlNode, String tableName) {
-    encapColumn(((SqlNodeList) sqlNode).getList(), tableName);
+  private void handlerOther(SqlNode sqlNode, List<TableInfo> tableInfos) {
+    encapColumn(((SqlNodeList) sqlNode).getList(), tableInfos);
   }
 
-  private void encapColumn(List<SqlNode> columns, String tableName) {
-    try {
-      ArrayNode sqlColumns = jsonSql.createArrayNode();
-      columns.forEach(
-          column -> {
-            try {
-              String columnRes = SqlJson.columnStr.replace("$name", column.toString());
-              JsonNode columnNode = jsonSql.readTree(columnRes);
-              sqlColumns.add(columnNode);
-            } catch (JsonProcessingException e) {
-              e.printStackTrace();
-            }
-          });
-      String node =
-          SqlJson.nodeStr
-              .replace("$tableName", tableName)
-              .replace("$columns", sqlColumns.toString());
-      sqlNodes.add(jsonSql.readTree(node));
-    } catch (JsonProcessingException e) {
-      e.printStackTrace();
+  private void encapColumn(List<SqlNode> columns, List<TableInfo> tableInfos) {
+    for (SqlNode column : columns) {
+      ColumnInfo columnInfo = ColumnInfo.builder().columnName(column.toString()).build();
+      tableInfos.get(tableInfos.size() - 1).getColumns().add(columnInfo);
     }
+    //    ArrayNode sqlColumns = jsonSql.createArrayNode();
+    //    columns.forEach(
+    //        column -> {
+    //          try {
+    //            String columnRes = SqlJson.columnStr.replace("$name", column.toString());
+    //            JsonNode columnNode = jsonSql.readTree(columnRes);
+    //            sqlColumns.add(columnNode);
+    //          } catch (JsonProcessingException e) {
+    //            e.printStackTrace();
+    //          }
+    //        });
+    //      String node =
+    //          SqlJson.nodeStr
+    //              .replace("$tableName", tableName)
+    //              .replace("$columns", sqlColumns.toString());
+    //      sqlNodes.add(jsonSql.readTree(node));
   }
 
-  // 目前看起来是表名
-  private String handlerIdentifier(SqlNode sqlNode) {
+  /**
+   * 目前看起来是表名
+   *
+   * @param sqlNode
+   * @param tableInfos
+   * @param flag 名字表示符
+   */
+  private void handlerIdentifier(SqlNode sqlNode, List<TableInfo> tableInfos, int flag) {
     SqlIdentifier sqlIdentifier = (SqlIdentifier) sqlNode;
-    return sqlIdentifier.names.get(0);
+    if (1 == flag) { // 真实名字
+      tableInfos.get(tableInfos.size() - 1).setTableName(sqlIdentifier.getSimple());
+    } else if (2 == flag) { // 别名
+      tableInfos.get(tableInfos.size() - 1).setAlias(sqlIdentifier.getSimple());
+    }
   }
 
   public static void main(String[] args) throws SqlParseException {
