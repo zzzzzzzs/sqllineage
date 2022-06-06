@@ -7,4 +7,6 @@ public enum Flag {
   TABLE_ALIAS, // 表&别名
   COLUMN_ALIAS, // 列&别名
   COLUMN, // 列
+  REAL, // 真实名字
+  ALIAS, // 别名
 }
