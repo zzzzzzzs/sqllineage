@@ -51,7 +51,7 @@ public class ParseSql {
   public String parseSelect(String sql) throws SqlParseException {
     sqlNodes.removeAll();
     if (sql == null || sql.isEmpty()) {
-      FileReader fileReader = new FileReader("sql/aquery099.sql");
+      FileReader fileReader = new FileReader("sql/aquery007.sql");
       sql = fileReader.readString();
     }
     sql = sql.trim();
@@ -96,7 +96,7 @@ public class ParseSql {
       case UNION:
         break;
       case ORDER_BY:
-        //        handlerOrderBy(sqlNode);
+        handlerOrderBy(sqlNode, tableInfoMaps, flag, level);
         break;
       case WITH:
         //        hanlderWith(sqlNode);
@@ -123,14 +123,22 @@ public class ParseSql {
   //    }
   //  }
   //
-  //  // handle order by
-  //  private void handlerOrderBy(SqlNode sqlNode) {
-  //    SqlOrderBy orderBy = (SqlOrderBy) sqlNode;
-  //    List<SqlNode> orderByList = orderBy.getOrderList();
-  //    for (SqlNode sqlNode1 : orderByList) {
-  //      handlerSql(sqlNode1);
-  //    }
-  //  }
+  // handle order by
+  // TODO 后期可以从 orderBy 中获取到列的名称补全列名
+  private void handlerOrderBy(
+      SqlNode sqlNode,
+      OrderedMap<String, TableInfo> tableInfoMaps,
+      Flag flag,
+      AtomicInteger level) {
+    SqlOrderBy orderBy = (SqlOrderBy) sqlNode;
+    SqlNode query = orderBy.query;
+    handlerSql(query, tableInfoMaps, flag, level);
+    //    List<SqlNode> orderByList = orderBy.orderList;
+    //    System.out.println("orderByList" + orderByList);
+    //    for (SqlNode sqlNode : orderByList) {
+    //      handlerSql(sqlNode);
+    //    }
+  }
 
   // handle join
   private void handlerJoin(
