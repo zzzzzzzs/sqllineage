@@ -1,3 +1,3 @@
 select name, age
-from t1,
-     t2
+from info1,
+     info2

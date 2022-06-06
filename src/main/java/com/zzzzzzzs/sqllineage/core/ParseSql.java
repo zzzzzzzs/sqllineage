@@ -51,7 +51,7 @@ public class ParseSql {
   public String parseSelect(String sql) throws SqlParseException {
     sqlNodes.removeAll();
     if (sql == null || sql.isEmpty()) {
-      FileReader fileReader = new FileReader("sql/aquery005.sql");
+      FileReader fileReader = new FileReader("sql/aquery099.sql");
       sql = fileReader.readString();
     }
     sql = sql.trim();
@@ -139,8 +139,8 @@ public class ParseSql {
     SqlNode left = join.getLeft();
     SqlNode right = join.getRight();
 
-    handlerSql(left, tableInfoMaps, null, level);
-    handlerSql(right, tableInfoMaps, null, level);
+    handlerSql(left, tableInfoMaps, Flag.REAL, level);
+    handlerSql(right, tableInfoMaps, Flag.REAL, level);
   }
 
   // handle select
