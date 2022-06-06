@@ -51,7 +51,7 @@ public class ParseSql {
   public String parseSelect(String sql) throws SqlParseException {
     sqlNodes.removeAll();
     if (sql == null || sql.isEmpty()) {
-      FileReader fileReader = new FileReader("sql/aquery007.sql");
+      FileReader fileReader = new FileReader("sql/aquery008.sql");
       sql = fileReader.readString();
     }
     sql = sql.trim();
@@ -99,7 +99,10 @@ public class ParseSql {
         handlerOrderBy(sqlNode, tableInfoMaps, flag, level);
         break;
       case WITH:
-        //        hanlderWith(sqlNode);
+        handleWith(sqlNode, tableInfoMaps, flag, level);
+        break;
+      case WITH_ITEM:
+        handleWithItem(sqlNode, tableInfoMaps, flag, level);
         break;
       case IDENTIFIER:
         // 表名
@@ -114,15 +117,31 @@ public class ParseSql {
     }
   }
 
-  //  // handle with
-  //  private void hanlderWith(SqlNode sqlNode) {
-  //    SqlWith with = (SqlWith) sqlNode;
-  //    List<SqlNode> withList = with.getWithList();
-  //    for (SqlNode sqlNode1 : withList) {
-  //      handlerSql(sqlNode1);
-  //    }
-  //  }
-  //
+  // handle with
+  private void handleWith(
+      SqlNode sqlNode,
+      OrderedMap<String, TableInfo> tableInfoMaps,
+      Flag flag,
+      AtomicInteger level) {
+    SqlWith with = (SqlWith) sqlNode;
+    List<@Nullable SqlNode> withList = with.withList.getList();
+    for (SqlNode node : withList) {
+      handlerSql(node, tableInfoMaps, flag, level);
+    }
+    handlerSql(with.body, tableInfoMaps, flag, level);
+  }
+
+  // handler with item
+  private void handleWithItem(
+      SqlNode sqlNode,
+      OrderedMap<String, TableInfo> tableInfoMaps,
+      Flag flag,
+      AtomicInteger level) {
+    SqlWithItem withItem = (SqlWithItem) sqlNode;
+    handlerSql(withItem.query, tableInfoMaps, flag, level);
+    handlerSql(withItem.name, tableInfoMaps, Flag.ALIAS, level);
+  }
+
   // handle order by
   // TODO 后期可以从 orderBy 中获取到列的名称补全列名
   private void handlerOrderBy(
@@ -160,15 +179,16 @@ public class ParseSql {
     level.getAndIncrement();
     SqlNode where = select.getWhere();
     handlerSql(where, null, null, level);
-    try {
-      from.getClass().getField("names");
-    } catch (NoSuchFieldException e) {
-      System.out.println("no names");
-    }
+    //    try {
+    //      from.getClass().getField("names");
+    //    } catch (NoSuchFieldException e) {
+    //      System.out.println("no names");
+    //    }
     SqlNode selectList = select.getSelectList();
     handlerSql(selectList, tableInfoMaps, null, level);
-    SqlNode groupBy = select.getGroup();
-    handlerSql(groupBy, null, null, level);
+    // TODO 后期处理
+    //    SqlNode groupBy = select.getGroup();
+    //    handlerSql(groupBy, null, null, level);
     SqlNode having = select.getHaving();
     handlerSql(having, null, null, level);
     SqlNodeList orderList = select.getOrderList();
