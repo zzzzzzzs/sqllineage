@@ -1,3 +1,4 @@
-select a.ca_state state
-from customer_address a
-   , customer c
+select name  as name_a,
+       age   as age_a,
+       grade as grade_a
+from info a

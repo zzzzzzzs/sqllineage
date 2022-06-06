@@ -1,11 +1,11 @@
 package com.zzzzzzzs.sqllineage.core;
 
 import cn.hutool.core.io.file.FileReader;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.google.common.collect.LinkedHashMultimap;
 import com.zzzzzzzs.sqllineage.bean.ColumnInfo;
+import com.zzzzzzzs.sqllineage.bean.Flag;
 import com.zzzzzzzs.sqllineage.bean.SqlJson;
 import com.zzzzzzzs.sqllineage.bean.TableInfo;
 import org.apache.calcite.avatica.util.Casing;
@@ -15,12 +15,15 @@ import org.apache.calcite.sql.*;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.impl.SqlParserImpl;
+import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
+import org.apache.commons.collections4.OrderedMap;
+import org.apache.commons.collections4.map.ListOrderedMap;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
-import java.util.ArrayList;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class ParseSql {
   FrameworkConfig config;
@@ -38,13 +41,14 @@ public class ParseSql {
                     .setQuoting(Quoting.BACK_TICK)
                     .setQuotedCasing(Casing.UNCHANGED)
                     .setUnquotedCasing(Casing.UNCHANGED)
-                    //                    .setConformance(SqlConformanceEnum.DEFAULT)
+                    .setConformance(SqlConformanceEnum.DEFAULT)
                     .build())
             .build();
   }
 
   // parse select
   public String parseSelect(String sql) throws SqlParseException {
+    sqlNodes.removeAll();
     if (sql == null || sql.isEmpty()) {
       FileReader fileReader = new FileReader("./sql/query002.sql");
       sql = fileReader.readString();
@@ -55,32 +59,37 @@ public class ParseSql {
     }
     SqlParser parser = SqlParser.create(sql, config.getParserConfig());
     SqlNode sqlNode = parser.parseStmt();
-    List<TableInfo> tableInfos = new ArrayList<>();
+    // table, TableInfo
+    OrderedMap<String, TableInfo> tableInfoMaps = new ListOrderedMap<>();
     // 默认真实名字
-    handlerSql(sqlNode, tableInfos, 1);
+    handlerSql(sqlNode, tableInfoMaps, null, new AtomicInteger(1));
     String res = SqlJson.res.replace("$nodes", sqlNodes.toString());
-    sqlNodes.removeAll();
+
     System.out.println(res);
-    System.out.println("tableInfos" + tableInfos);
+    System.out.println("tableInfoMaps" + tableInfoMaps);
     return res;
   }
 
   // handle sqlnode
-  private void handlerSql(SqlNode sqlNode, List<TableInfo> tableInfos, int flag) {
+  private void handlerSql(
+      SqlNode sqlNode,
+      OrderedMap<String, TableInfo> tableInfoMaps,
+      Flag flag,
+      AtomicInteger level) {
     if (sqlNode == null) return;
     SqlKind kind = sqlNode.getKind();
     switch (kind) {
       case INSERT:
-        handlerInsert(sqlNode);
+        handlerInsert(sqlNode, level);
         break;
       case SELECT:
-        handlerSelect(sqlNode, tableInfos);
+        handlerSelect(sqlNode, tableInfoMaps, level);
         break;
       case JOIN:
-        handlerJoin(sqlNode, tableInfos);
+        handlerJoin(sqlNode, tableInfoMaps, level);
         break;
       case AS:
-        handlerAs(sqlNode, tableInfos);
+        handlerAs(sqlNode, tableInfoMaps, flag, level);
         break;
       case UNION:
         break;
@@ -92,26 +101,16 @@ public class ParseSql {
         break;
       case IDENTIFIER:
         // 表名
-        handlerIdentifier(sqlNode, tableInfos, flag);
+        handlerIdentifier(sqlNode, tableInfoMaps);
         break;
       case OTHER:
         // 列名
-        handlerOther(sqlNode, tableInfos);
+        handlerOther(sqlNode, tableInfoMaps);
         break;
       default:
         break;
     }
   }
-
-  //  private void handlerIdentifier(SqlNode sqlNode) {
-  //    SqlIdentifier identifier = (SqlIdentifier) sqlNode;
-  //    System.out.println("处理的名字：" + identifier.names);
-  //  }
-  //
-  //  private void handlerOther(SqlNode sqlNode) {
-  //    // TODO AS
-  //    System.out.println("处理的名字：" + sqlNode.toString());
-  //  }
 
   //  // handle with
   //  private void hanlderWith(SqlNode sqlNode) {
@@ -132,223 +131,107 @@ public class ParseSql {
   //  }
 
   // handle join
-  private void handlerJoin(SqlNode sqlNode, List<TableInfo> tableInfos) {
+  private void handlerJoin(
+      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, AtomicInteger level) {
     SqlJoin join = (SqlJoin) sqlNode;
     SqlNode left = join.getLeft();
     SqlNode right = join.getRight();
-    handlerSql(left, tableInfos, 1);
-    handlerSql(right, tableInfos, 1);
+
+    handlerSql(left, tableInfoMaps, null, level);
+    handlerSql(right, tableInfoMaps, null, level);
   }
 
   // handle select
-  private void handlerSelect(SqlNode sqlNode, List<TableInfo> tableInfos) {
+  private void handlerSelect(
+      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, AtomicInteger level) {
     SqlSelect select = (SqlSelect) sqlNode;
     SqlNode from = select.getFrom();
-    handlerSql(from, tableInfos, 1);
-    SqlNode selectList = select.getSelectList();
-    handlerSql(selectList, tableInfos, 1);
+    handlerSql(from, tableInfoMaps, null, level);
+    level.getAndIncrement();
     SqlNode where = select.getWhere();
-    handlerSql(where, null, 1);
+    handlerSql(where, null, null, level);
+    try {
+      from.getClass().getField("names");
+    } catch (NoSuchFieldException e) {
+      System.out.println("no names");
+    }
+    SqlNode selectList = select.getSelectList();
+    handlerSql(selectList, tableInfoMaps, null, level);
     SqlNode groupBy = select.getGroup();
-    handlerSql(groupBy, null, 1);
+    handlerSql(groupBy, null, null, level);
     SqlNode having = select.getHaving();
-    handlerSql(having, null, 1);
+    handlerSql(having, null, null, level);
     SqlNodeList orderList = select.getOrderList();
-    handlerSql(orderList, null, 1);
+    handlerSql(orderList, null, null, level);
   }
 
   // handle insert
-  private void handlerInsert(SqlNode sqlNode) {
+  private void handlerInsert(SqlNode sqlNode, AtomicInteger level) {
     SqlInsert sqlInsert = (SqlInsert) sqlNode;
     SqlNode insertList = sqlInsert.getTargetTable();
-    handlerSql(insertList, null, 1);
+    handlerSql(insertList, null, null, level);
     SqlNode source = sqlInsert.getSource();
-    handlerSql(source, null, 1);
+    handlerSql(source, null, null, level);
   }
 
-  //  private void hanlerTable(SqlNode sqlNode) {
-  //    SqlNodeList<SqlNode> nodeList = sqlNode.getNodeList();
-  //    handlerField(nodeList);
-  //  }
-
-  //  private void hanlerSelect(SqlNode sqlNode) {
-  //    SqlSelect sqlSelect = (SqlSelect) sqlNode;
-  //    SqlNode query = sqlSelect.query;
-  //    hanlerSQL(query);
-  //    SqlNodeList<SqlNode> selectList = sqlSelect.getSelectList();
-  //    handlerField(selectList);
-  //    SqlNodeList<SqlNode> fromList = sqlSelect.getFrom();
-  //    handlerField(fromList);
-  //    SqlNodeList<SqlNode> whereList = sqlSelect.getWhere();
-  //    handlerField(whereList);
-  //    SqlNodeList<SqlNode> groupByList = sqlSelect.getGroupBy();
-  //    handlerField(groupByList);
-  //    SqlNodeList<SqlNode> havingList = sqlSelect.getHaving();
-  //    handlerField(havingList);
-  //    SqlNodeList<SqlNode> orderByList = sqlSelect.getOrderBy();
-  //    handlerField(orderByList);
-  //    SqlNode limit = sqlSelect.getLimit();
-  //    hanlerSQL(limit);
-  //  }
-
-  //  private void handlerField(SqlNodeList nodeList) {
-  //    for (SqlNode node : nodeList) {
-  //      handlerSql(node);
-  //    }
-  //  }
-  //
-  //  private void handlerJoin(SqlNode sqlNode) {
-  //    SqlJoin sqlJoin = (SqlJoin) sqlNode;
-  //    SqlNode left = sqlJoin.getLeft();
-  //    handlerSql(left);
-  //    SqlNode right = sqlJoin.getRight();
-  //    handlerSql(right);
-  //    SqlNode condition = sqlJoin.getCondition();
-  //    handlerSql(condition);
-  //  }
-  //
-  //  private void handlerInsert(SqlNode sqlNode) {
-  //    SqlInsert sqlInsert = (SqlInsert) sqlNode;
-  //    SqlNode query = sqlInsert.getQuery();
-  //    handlerSql(query);
-  //    SqlNodeList<SqlNode> columnList = sqlInsert.getColumnList();
-  //    handlerField(columnList);
-  //    SqlNodeList<SqlNode> valueList = sqlInsert.getValueList();
-  //    handlerField(valueList);
-  //  }
-  //
-  //  private void handlerSelect(SqlNode sqlNode) {
-  //    SqlSelect sqlSelect = (SqlSelect) sqlNode;
-  //    SqlNode query = sqlSelect.getQuery();
-  //    handlerSql(query);
-  //    SqlNodeList<SqlNode> selectList = sqlSelect.getSelectList();
-  //    handlerField(selectList);
-  //    SqlNodeList<SqlNode> fromList = sqlSelect.getFrom();
-  //    handlerField(fromList);
-  //    SqlNodeList<SqlNode> whereList = sqlSelect.getWhere();
-  //    handlerField(whereList);
-  //    SqlNodeList<SqlNode> groupByList = sqlSelect.getGroupBy();
-  //    handlerField(groupByList);
-  //    SqlNodeList<SqlNode> havingList = sqlSelect.getHaving();
-  //    handlerField(havingList);
-  //    SqlNodeList<SqlNode> orderByList = sqlSelect.getOrderBy();
-  //    handlerField(orderByList);
-  //    SqlNode limit = sqlSelect.getLimit();
-  //    handlerSql(limit);
-  //  }
-  //
-  //  private void handlerUpdate(SqlNode sqlNode) {
-  //    SqlUpdate sqlUpdate = (SqlUpdate) sqlNode;
-  //    SqlNode query = sqlUpdate.getQuery();
-  //    handlerSql(query);
-  //    SqlNodeList<SqlNode> setList = sqlUpdate.getSetList();
-  //    handlerField(setList);
-  //    SqlNodeList<SqlNode> whereList = sqlUpdate.getWhere();
-  //    handlerField(whereList);
-  //  }
-  //
-  //  private void handlerDelete(SqlNode sqlNode) {
-  //    SqlDelete sqlDelete = (SqlDelete) sqlNode;
-  //    SqlNode query = sqlDelete.getQuery();
-  //    handlerSql(query);
-  //    SqlNodeList<SqlNode> whereList = sqlDelete.getWhere();
-  //    handlerField(whereList);
-  //  }
-  //
-  //  private void handlerCall(SqlNode sqlNode) {
-  //    SqlCall sqlCall = (SqlCall) sqlNode;
-  //    SqlNodeList<SqlNode> operandList = sqlCall.getOperandList();
-  //    handlerField(operandList);
-  //  }
-  //
-  //  private void handlerSql(SqlNode sqlNode) {
-  //    if (sqlNode instanceof SqlSelect) {
-  //      handlerSelect(sqlNode);
-  //    } else if (sqlNode instanceof SqlUpdate) {
-  //      handlerUpdate(sqlNode);
-  //    } else if (sqlNode instanceof SqlDelete) {
-  //      handlerDelete(sqlNode);
-  //    } else if (sqlNode instanceof SqlInsert) {
-  //      handlerInsert(sqlNode);
-  //    } else if (sqlNode instanceof SqlCall) {
-  //      handlerCall(sqlNode);
-  //    } else if (sqlNode instanceof SqlJoin) {
-  //      handlerJoin(sqlNode);
-  //    } else if (sqlNode instanceof SqlOrderBy) {
-  //      handlerOrderBy(sqlNode);
-  //    } else if (sqlNode instanceof SqlWith) {
-  //      hanlderWith(sqlNode);
-  //    } else if (sqlNode instanceof SqlNodeList) {
-  //      handlerField(sqlNode);
-  //    } else if (sqlNode instanceof SqlIdentifier) {
-  //      handlerIdentifier(sqlNode);
-  //    }
-  //  }
-  //
-  //
-  //  private void handlerInsert(SqlNode sqlNode) {
-  //    SqlInsert sqlInsert = (SqlInsert) sqlNode;
-  ////    SqlNode target = sqlInsert.getTarget();
-  //    SqlNode targetTable = sqlInsert.getTargetTable();
-  ////    handlerSql(target);
-  //    SqlNode source = sqlInsert.getSource();
-  //    handlerSql(source);
-  //  }
-  //
-  //  private void handlerSelect(SqlNode sqlNode) {
-  //    SqlSelect sqlSelect = (SqlSelect) sqlNode;
-  //    SqlNode query = sqlSelect.query;
-  //
-  //    handlerSql(query);
-  //    SqlNodeList selectList = sqlSelect.getSelectList();
-  //    handlerField(selectList);
-  //    SqlNodeList<SqlNode> fromList = sqlSelect.getFrom();
-  //    handlerField(fromList);
-  //    SqlNodeList<SqlNode> whereList = sqlSelect.getWhere();
-  //    handlerField(whereList);
-  //    SqlNodeList<SqlNode> groupByList = sqlSelect.getGroupBy();
-  //    handlerField(groupByList);
-  //    SqlNodeList<SqlNode> havingList = sqlSelect.getHaving();
-  //    handlerField(havingList);
-  //    SqlNodeList<SqlNode> orderByList = sqlSelect.getOrderBy();
-  //    handlerField(orderByList);
-  //    SqlNode limit = sqlSelect.getLimit();
-  //    handlerSql(limit);
-  //  }
-  //
-  //  private void handlerJoin(SqlNode sqlNode) {
-  //    SqlJoin sqlJoin = (SqlJoin) sqlNode;
-  //    SqlNode left = sqlJoin.getLeft();
-  //    handlerSql(left);
-  //    SqlNode right = sqlJoin.getRight();
-  //    handlerSql(right);
-  //  }
-  //
-  private void handlerAs(SqlNode sqlNode, List<TableInfo> tableInfos) {
+  private void handlerAs(
+      SqlNode sqlNode,
+      OrderedMap<String, TableInfo> tableInfoMaps,
+      Flag flag,
+      AtomicInteger level) {
     SqlBasicCall sqlBasicCall = (SqlBasicCall) sqlNode;
     List<SqlNode> operandList = sqlBasicCall.getOperandList();
-    TableInfo tableInfo =
-        TableInfo.builder()
-            .tableName(new String())
-            .alias(new String())
-            .columns(new ArrayList<>())
-            .build();
-    tableInfos.add(tableInfo);
+
     SqlNode left = operandList.get(0);
-    handlerSql(left, tableInfos, 1);
     SqlNode right = operandList.get(1);
-    handlerSql(right, tableInfos, 2);
+
+    if (Flag.COLUMN.equals(flag)) {
+      // 获取最后一个表名
+      ColumnInfo columnInfo =
+          ColumnInfo.builder().columnName(left.toString()).alias(right.toString()).build();
+      tableInfoMaps.get(tableInfoMaps.lastKey()).getColumns().add(columnInfo);
+    } else {
+      handlerSql(left, tableInfoMaps, null, level);
+      handlerSql(right, tableInfoMaps, null, level);
+    }
   }
 
-  // 目前看起来是列名
-  private void handlerOther(SqlNode sqlNode, List<TableInfo> tableInfos) {
-    encapColumn(((SqlNodeList) sqlNode).getList(), tableInfos);
+  /**
+   * 列名，但是包含别名
+   *
+   * @param sqlNode
+   * @param tableInfoMaps
+   */
+  private void handlerOther(SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps) {
+    List<@Nullable SqlNode> list = ((SqlNodeList) sqlNode).getList();
+    for (SqlNode node : list) {
+      if (SqlKind.AS.equals(node.getKind())) { // 列别名
+        handlerSql(node, tableInfoMaps, Flag.COLUMN, new AtomicInteger(10000));
+      } else {
+        encapColumn(((SqlNodeList) sqlNode).getList(), tableInfoMaps);
+      }
+    }
+    //    ((SqlNodeList) sqlNode)
+    //        .getList()
+    //        .forEach(column -> handlerSql(column, tableInfoMaps, new AtomicInteger(1000)));
+    //    if (SqlKind.AS.equals(sqlNode.getKind())) {
+    //      SqlBasicCall sqlBasicCall = (SqlBasicCall) sqlNode;
+    //      List<SqlNode> operandList = sqlBasicCall.getOperandList();
+    //      SqlNode left = operandList.get(0);
+    //      SqlNode right = operandList.get(1);
+    //      handlerSql(left, tableInfoMaps, new AtomicInteger(1000));
+    //      handlerSql(right, tableInfoMaps, new AtomicInteger(1000));
+    //    }
+    //    encapColumn(((SqlNodeList) sqlNode).getList(), tableInfoMaps);
   }
 
-  private void encapColumn(List<SqlNode> columns, List<TableInfo> tableInfos) {
+  // 封装
+  private void encapColumn(List<SqlNode> columns, OrderedMap<String, TableInfo> tableInfoMaps) {
+    TableInfo tableInfo = tableInfoMaps.get(tableInfoMaps.lastKey());
     for (SqlNode column : columns) {
       ColumnInfo columnInfo = ColumnInfo.builder().columnName(column.toString()).build();
-      tableInfos.get(tableInfos.size() - 1).getColumns().add(columnInfo);
+      tableInfo.getColumns().add(columnInfo);
+      //      tableInfoMaps.get(tableInfoMaps.size() - 1).getColumns().add(columnInfo);
     }
     //    ArrayNode sqlColumns = jsonSql.createArrayNode();
     //    columns.forEach(
@@ -372,15 +255,21 @@ public class ParseSql {
    * 目前看起来是表名
    *
    * @param sqlNode
-   * @param tableInfos
-   * @param flag 名字表示符
+   * @param tableInfoMaps
+   * @param flag 名字标识符
    */
-  private void handlerIdentifier(SqlNode sqlNode, List<TableInfo> tableInfos, int flag) {
+  private void handlerIdentifier(SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps) {
     SqlIdentifier sqlIdentifier = (SqlIdentifier) sqlNode;
-    if (1 == flag) { // 真实名字
-      tableInfos.get(tableInfos.size() - 1).setTableName(sqlIdentifier.getSimple());
-    } else if (2 == flag) { // 别名
-      tableInfos.get(tableInfos.size() - 1).setAlias(sqlIdentifier.getSimple());
+    TableInfo tableInfo;
+    if (!tableInfoMaps.containsKey(sqlIdentifier.getSimple())) {
+      tableInfo =
+          TableInfo.builder()
+              .tableName(sqlIdentifier.getSimple())
+              .alias(new String())
+              .columns(new ArrayList<>())
+              .level(1000)
+              .build();
+      tableInfoMaps.put(sqlIdentifier.getSimple(), tableInfo);
     }
   }
 
