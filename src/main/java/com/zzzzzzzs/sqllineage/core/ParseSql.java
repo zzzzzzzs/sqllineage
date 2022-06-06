@@ -3,7 +3,6 @@ package com.zzzzzzzs.sqllineage.core;
 import cn.hutool.core.io.file.FileReader;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.google.common.collect.LinkedHashMultimap;
 import com.zzzzzzzs.sqllineage.bean.ColumnInfo;
 import com.zzzzzzzs.sqllineage.bean.Flag;
 import com.zzzzzzzs.sqllineage.bean.SqlJson;
@@ -50,7 +49,7 @@ public class ParseSql {
   public String parseSelect(String sql) throws SqlParseException {
     sqlNodes.removeAll();
     if (sql == null || sql.isEmpty()) {
-      FileReader fileReader = new FileReader("./sql/query002.sql");
+      FileReader fileReader = new FileReader("sql/query003.sql");
       sql = fileReader.readString();
     }
     sql = sql.trim();
@@ -191,8 +190,16 @@ public class ParseSql {
           ColumnInfo.builder().columnName(left.toString()).alias(right.toString()).build();
       tableInfoMaps.get(tableInfoMaps.lastKey()).getColumns().add(columnInfo);
     } else {
-      handlerSql(left, tableInfoMaps, null, level);
-      handlerSql(right, tableInfoMaps, null, level);
+      TableInfo tableInfo =
+          TableInfo.builder()
+              .tableName(left.toString())
+              .alias(right.toString())
+              .columns(new ArrayList<>())
+              .level(1000)
+              .build();
+      tableInfoMaps.put(left.toString(), tableInfo);
+      //      handlerSql(left, tableInfoMaps, null, level);
+      //      handlerSql(right, tableInfoMaps, null, level);
     }
   }
 
@@ -204,11 +211,14 @@ public class ParseSql {
    */
   private void handlerOther(SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps) {
     List<@Nullable SqlNode> list = ((SqlNodeList) sqlNode).getList();
+    TableInfo tableInfo = tableInfoMaps.get(tableInfoMaps.lastKey());
     for (SqlNode node : list) {
-      if (SqlKind.AS.equals(node.getKind())) { // 列别名
+      if (SqlKind.AS.equals(node.getKind())) { // 处理列别名
         handlerSql(node, tableInfoMaps, Flag.COLUMN, new AtomicInteger(10000));
       } else {
-        encapColumn(((SqlNodeList) sqlNode).getList(), tableInfoMaps);
+        ColumnInfo columnInfo = ColumnInfo.builder().columnName(node.toString()).build();
+        tableInfo.getColumns().add(columnInfo);
+        //        encapColumn(node).getList(), tableInfoMaps);
       }
     }
     //    ((SqlNodeList) sqlNode)
@@ -223,32 +233,6 @@ public class ParseSql {
     //      handlerSql(right, tableInfoMaps, new AtomicInteger(1000));
     //    }
     //    encapColumn(((SqlNodeList) sqlNode).getList(), tableInfoMaps);
-  }
-
-  // 封装
-  private void encapColumn(List<SqlNode> columns, OrderedMap<String, TableInfo> tableInfoMaps) {
-    TableInfo tableInfo = tableInfoMaps.get(tableInfoMaps.lastKey());
-    for (SqlNode column : columns) {
-      ColumnInfo columnInfo = ColumnInfo.builder().columnName(column.toString()).build();
-      tableInfo.getColumns().add(columnInfo);
-      //      tableInfoMaps.get(tableInfoMaps.size() - 1).getColumns().add(columnInfo);
-    }
-    //    ArrayNode sqlColumns = jsonSql.createArrayNode();
-    //    columns.forEach(
-    //        column -> {
-    //          try {
-    //            String columnRes = SqlJson.columnStr.replace("$name", column.toString());
-    //            JsonNode columnNode = jsonSql.readTree(columnRes);
-    //            sqlColumns.add(columnNode);
-    //          } catch (JsonProcessingException e) {
-    //            e.printStackTrace();
-    //          }
-    //        });
-    //      String node =
-    //          SqlJson.nodeStr
-    //              .replace("$tableName", tableName)
-    //              .replace("$columns", sqlColumns.toString());
-    //      sqlNodes.add(jsonSql.readTree(node));
   }
 
   /**
