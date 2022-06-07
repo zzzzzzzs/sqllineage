@@ -23,6 +23,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class ParseSql {
@@ -72,7 +73,7 @@ public class ParseSql {
     // table, TableInfo
     OrderedMap<String, TableInfo> tableInfoMaps = new ListOrderedMap<>();
     // 默认真实名字
-    handlerSql(sqlNode, tableInfoMaps, Flag.REAL, new AtomicInteger(1));
+    handlerSql(sqlNode, tableInfoMaps, Flag.REAL);
     String res = SqlJson.res.replace("$nodes", sqlNodes.toString());
 
     System.out.println(res);
@@ -82,40 +83,36 @@ public class ParseSql {
   }
 
   // handle sqlnode
-  private void handlerSql(
-      SqlNode sqlNode,
-      OrderedMap<String, TableInfo> tableInfoMaps,
-      Flag flag,
-      AtomicInteger level) {
+  private void handlerSql(SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
     if (sqlNode == null) return;
     SqlKind kind = sqlNode.getKind();
     switch (kind) {
       case INSERT:
-        handlerInsert(sqlNode, level);
+        handlerInsert(sqlNode);
         break;
       case SELECT:
-        handlerSelect(sqlNode, tableInfoMaps, flag, level);
+        handlerSelect(sqlNode, tableInfoMaps, flag);
         break;
       case JOIN:
-        handlerJoin(sqlNode, tableInfoMaps, level);
+        handlerJoin(sqlNode, tableInfoMaps);
         break;
       case AS:
-        handlerAs(sqlNode, tableInfoMaps, flag, level);
+        handlerAs(sqlNode, tableInfoMaps, flag);
         break;
       case UNION:
         break;
       case ORDER_BY:
-        handlerOrderBy(sqlNode, tableInfoMaps, flag, level);
+        handlerOrderBy(sqlNode, tableInfoMaps, flag);
         break;
       case WITH:
-        handleWith(sqlNode, tableInfoMaps, flag, level);
+        handleWith(sqlNode, tableInfoMaps, flag);
         break;
       case WITH_ITEM:
-        handleWithItem(sqlNode, tableInfoMaps, flag, level);
+        handleWithItem(sqlNode, tableInfoMaps, flag);
         break;
       case IDENTIFIER:
         // 表名
-        handlerIdentifier(sqlNode, tableInfoMaps, flag, level);
+        handlerIdentifier(sqlNode, tableInfoMaps, flag);
         break;
       case OTHER:
         // 列名
@@ -127,95 +124,77 @@ public class ParseSql {
   }
 
   // handle with
-  private void handleWith(
-      SqlNode sqlNode,
-      OrderedMap<String, TableInfo> tableInfoMaps,
-      Flag flag,
-      AtomicInteger level) {
+  private void handleWith(SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
     SqlWith with = (SqlWith) sqlNode;
     List<@Nullable SqlNode> withList = with.withList.getList();
     for (SqlNode node : withList) {
-      handlerSql(node, tableInfoMaps, flag, level);
+      handlerSql(node, tableInfoMaps, flag);
     }
-    handlerSql(with.body, tableInfoMaps, Flag.WITH_BODY, level);
+    handlerSql(with.body, tableInfoMaps, Flag.WITH_BODY);
   }
 
   // handler with item
   private void handleWithItem(
-      SqlNode sqlNode,
-      OrderedMap<String, TableInfo> tableInfoMaps,
-      Flag flag,
-      AtomicInteger level) {
+      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
     SqlWithItem withItem = (SqlWithItem) sqlNode;
-    handlerSql(withItem.query, tableInfoMaps, flag, level);
-    handlerSql(withItem.name, tableInfoMaps, Flag.WITH_ITEM, level);
+    handlerSql(withItem.query, tableInfoMaps, flag);
+    handlerSql(withItem.name, tableInfoMaps, Flag.WITH_ITEM);
   }
 
   // handle order by
   // TODO 后期可以从 orderBy 中获取到列的名称补全列名
   private void handlerOrderBy(
-      SqlNode sqlNode,
-      OrderedMap<String, TableInfo> tableInfoMaps,
-      Flag flag,
-      AtomicInteger level) {
+      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
     SqlOrderBy orderBy = (SqlOrderBy) sqlNode;
     SqlNode query = orderBy.query;
-    handlerSql(query, tableInfoMaps, flag, level);
+    handlerSql(query, tableInfoMaps, flag);
   }
 
   // handle join
-  private void handlerJoin(
-      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, AtomicInteger level) {
+  private void handlerJoin(SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps) {
     SqlJoin join = (SqlJoin) sqlNode;
     SqlNode left = join.getLeft();
     SqlNode right = join.getRight();
 
-    handlerSql(left, tableInfoMaps, Flag.REAL, level);
-    handlerSql(right, tableInfoMaps, Flag.REAL, level);
+    handlerSql(left, tableInfoMaps, Flag.REAL);
+    handlerSql(right, tableInfoMaps, Flag.REAL);
   }
 
   // handle select
   private void handlerSelect(
-      SqlNode sqlNode,
-      OrderedMap<String, TableInfo> tableInfoMaps,
-      Flag flag,
-      AtomicInteger level) {
+      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
     SqlSelect select = (SqlSelect) sqlNode;
     SqlNode from = select.getFrom();
-    handlerSql(from, tableInfoMaps, flag, level);
-    level.getAndIncrement();
+    handlerSql(from, tableInfoMaps, flag);
+    //    level.getAndIncrement();
     SqlNode where = select.getWhere();
-    handlerSql(where, null, null, level);
+    handlerSql(where, null, null);
     //    try {
     //      from.getClass().getField("names");
     //    } catch (NoSuchFieldException e) {
     //      System.out.println("no names");
     //    }
     SqlNode selectList = select.getSelectList();
-    handlerSql(selectList, tableInfoMaps, flag, level);
+    handlerSql(selectList, tableInfoMaps, flag);
     // TODO 后期处理
     //    SqlNode groupBy = select.getGroup();
-    //    handlerSql(groupBy, null, null, level);
+    //    handlerSql(groupBy, null, null);
     SqlNode having = select.getHaving();
-    handlerSql(having, null, null, level);
+    handlerSql(having, null, null);
     SqlNodeList orderList = select.getOrderList();
-    handlerSql(orderList, null, null, level);
+    handlerSql(orderList, null, null);
   }
 
   // handle insert
-  private void handlerInsert(SqlNode sqlNode, AtomicInteger level) {
+  private void handlerInsert(SqlNode sqlNode) {
     SqlInsert sqlInsert = (SqlInsert) sqlNode;
     SqlNode insertList = sqlInsert.getTargetTable();
-    handlerSql(insertList, null, null, level);
+    handlerSql(insertList, null, null);
     SqlNode source = sqlInsert.getSource();
-    handlerSql(source, null, null, level);
+    handlerSql(source, null, null);
   }
 
-  private void handlerAs(
-      SqlNode sqlNode,
-      OrderedMap<String, TableInfo> tableInfoMaps,
-      Flag flag,
-      AtomicInteger level) {
+  private void handlerAs(SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
     SqlBasicCall sqlBasicCall = (SqlBasicCall) sqlNode;
     List<SqlNode> operandList = sqlBasicCall.getOperandList();
 
@@ -228,12 +207,12 @@ public class ParseSql {
           ColumnInfo.builder().columnName(left.toString()).alias(right.toString()).build();
       tableInfoMaps.get(tableInfoMaps.lastKey()).getColumns().add(columnInfo);
     } else {
-      handlerSql(left, tableInfoMaps, Flag.REAL, level);
+      handlerSql(left, tableInfoMaps, Flag.REAL);
       // 左是名字，那么右就是别名
       if (SqlKind.IDENTIFIER.equals(left.getKind())) {
-        handlerSql(right, tableInfoMaps, Flag.ALIAS, level);
+        handlerSql(right, tableInfoMaps, Flag.ALIAS);
       } else {
-        handlerSql(right, tableInfoMaps, Flag.REAL, level);
+        handlerSql(right, tableInfoMaps, Flag.REAL);
       }
     }
   }
@@ -256,12 +235,11 @@ public class ParseSql {
     lastColumnInfos.clear();
     for (SqlNode node : list) {
       if (SqlKind.AS.equals(node.getKind())) { // 处理列别名
-        handlerSql(node, tableInfoMaps, Flag.COLUMN, new AtomicInteger(10000));
+        handlerSql(node, tableInfoMaps, Flag.COLUMN);
       } else {
         ColumnInfo columnInfo = ColumnInfo.builder().columnName(node.toString()).build();
         lastColumnInfos.add(columnInfo);
         tableInfo.getColumns().add(columnInfo);
-        //        tableInfo.getVirColumns().add(columnInfo);
       }
     }
   }
@@ -274,12 +252,11 @@ public class ParseSql {
    * @param flag 名字标识符
    */
   private void handlerIdentifier(
-      SqlNode sqlNode,
-      OrderedMap<String, TableInfo> tableInfoMaps,
-      Flag flag,
-      AtomicInteger level) {
+      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
     SqlIdentifier sqlIdentifier = (SqlIdentifier) sqlNode;
     TableInfo tableInfo = null;
+    int level =
+        Optional.ofNullable(tableInfoMaps.get(lastTableName)).map(TableInfo::getLevel).orElse(0) + 1;
     if (Flag.REAL.equals(flag)) {
       if (tableInfoMaps.size() == 0 || !tableInfoMaps.containsKey(sqlIdentifier.getSimple())) {
         tableInfo =
@@ -287,8 +264,7 @@ public class ParseSql {
                 .tableName(sqlIdentifier.getSimple())
                 .alias(new String())
                 .columns(new LinkedHashSet<>())
-                //                .virColumns(new LinkedHashSet<>())
-                .level(level.get())
+                .level(level)
                 .build();
         tableInfoMaps.put(sqlIdentifier.getSimple(), tableInfo);
       }
@@ -301,8 +277,7 @@ public class ParseSql {
               .tableName(sqlIdentifier.getSimple())
               .alias(new String())
               .columns(new LinkedHashSet<>(lastColumnInfos))
-              //              .virColumns(new LinkedHashSet<>(lastColumnInfos))
-              .level(level.get())
+              .level(level)
               .build();
       tableInfoMaps.put(sqlIdentifier.getSimple(), tableInfo);
     } else if (Flag.WITH_BODY.equals(flag)) {
@@ -311,8 +286,7 @@ public class ParseSql {
               .tableName("res")
               .alias(new String())
               .columns(new LinkedHashSet<>())
-              //              .virColumns(new LinkedHashSet<>())
-              .level(level.get())
+              .level(level)
               .build();
       tableInfoMaps.put("res", tableInfo);
     }
