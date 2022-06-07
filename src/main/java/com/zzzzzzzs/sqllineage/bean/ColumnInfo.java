@@ -2,10 +2,12 @@ package com.zzzzzzzs.sqllineage.bean;
 
 import lombok.Builder;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 @Data
 @Builder
+@EqualsAndHashCode
 public class ColumnInfo {
   String columnName; // 列名
-  String alias; // 列别名
+  @EqualsAndHashCode.Exclude String alias; // 列别名
 }

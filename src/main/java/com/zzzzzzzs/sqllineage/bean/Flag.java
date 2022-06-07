@@ -9,4 +9,6 @@ public enum Flag {
   COLUMN, // 列
   REAL, // 真实名字
   ALIAS, // 别名
+  WITH_ITEM, // WITH_ITEM
+  WITH_BODY, // WITH BODY
 }

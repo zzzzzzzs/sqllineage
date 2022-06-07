@@ -12,7 +12,6 @@ import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.avatica.util.Quoting;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.sql.*;
-import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.impl.SqlParserImpl;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
@@ -22,13 +21,16 @@ import org.apache.commons.collections4.OrderedMap;
 import org.apache.commons.collections4.map.ListOrderedMap;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-import java.util.*;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class ParseSql {
   FrameworkConfig config;
   ObjectMapper jsonSql = new ObjectMapper();
   ArrayNode sqlNodes = jsonSql.createArrayNode();
+  LinkedHashSet<ColumnInfo> lastColumnInfos = new LinkedHashSet<>(); // 记录上一次的列信息
+  String lastTableName; // 记录上一次的表名
 
   public ParseSql() {
     SchemaPlus rootSchema = Frameworks.createRootSchema(true);
@@ -46,12 +48,19 @@ public class ParseSql {
             .build();
   }
 
+  public void init() {
+    lastTableName = "";
+    lastColumnInfos.clear();
+    sqlNodes.removeAll();
+  }
+
   // parse select
   @SneakyThrows
-  public String parseSelect(String sql) throws SqlParseException {
-    sqlNodes.removeAll();
+  public String parseSelect(String sql) {
+    // TODO: 高并发下有问题
+    init();
     if (sql == null || sql.isEmpty()) {
-      FileReader fileReader = new FileReader("sql/aquery008.sql");
+      FileReader fileReader = new FileReader("sql/aquery010.sql");
       sql = fileReader.readString();
     }
     sql = sql.trim();
@@ -63,7 +72,7 @@ public class ParseSql {
     // table, TableInfo
     OrderedMap<String, TableInfo> tableInfoMaps = new ListOrderedMap<>();
     // 默认真实名字
-    handlerSql(sqlNode, tableInfoMaps, null, new AtomicInteger(1));
+    handlerSql(sqlNode, tableInfoMaps, Flag.REAL, new AtomicInteger(1));
     String res = SqlJson.res.replace("$nodes", sqlNodes.toString());
 
     System.out.println(res);
@@ -85,7 +94,7 @@ public class ParseSql {
         handlerInsert(sqlNode, level);
         break;
       case SELECT:
-        handlerSelect(sqlNode, tableInfoMaps, level);
+        handlerSelect(sqlNode, tableInfoMaps, flag, level);
         break;
       case JOIN:
         handlerJoin(sqlNode, tableInfoMaps, level);
@@ -110,7 +119,7 @@ public class ParseSql {
         break;
       case OTHER:
         // 列名
-        handlerOther(sqlNode, tableInfoMaps);
+        handlerOther(sqlNode, tableInfoMaps, flag);
         break;
       default:
         break;
@@ -128,7 +137,7 @@ public class ParseSql {
     for (SqlNode node : withList) {
       handlerSql(node, tableInfoMaps, flag, level);
     }
-    handlerSql(with.body, tableInfoMaps, flag, level);
+    handlerSql(with.body, tableInfoMaps, Flag.WITH_BODY, level);
   }
 
   // handler with item
@@ -139,7 +148,7 @@ public class ParseSql {
       AtomicInteger level) {
     SqlWithItem withItem = (SqlWithItem) sqlNode;
     handlerSql(withItem.query, tableInfoMaps, flag, level);
-    handlerSql(withItem.name, tableInfoMaps, Flag.ALIAS, level);
+    handlerSql(withItem.name, tableInfoMaps, Flag.WITH_ITEM, level);
   }
 
   // handle order by
@@ -152,11 +161,6 @@ public class ParseSql {
     SqlOrderBy orderBy = (SqlOrderBy) sqlNode;
     SqlNode query = orderBy.query;
     handlerSql(query, tableInfoMaps, flag, level);
-    //    List<SqlNode> orderByList = orderBy.orderList;
-    //    System.out.println("orderByList" + orderByList);
-    //    for (SqlNode sqlNode : orderByList) {
-    //      handlerSql(sqlNode);
-    //    }
   }
 
   // handle join
@@ -172,10 +176,13 @@ public class ParseSql {
 
   // handle select
   private void handlerSelect(
-      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, AtomicInteger level) {
+      SqlNode sqlNode,
+      OrderedMap<String, TableInfo> tableInfoMaps,
+      Flag flag,
+      AtomicInteger level) {
     SqlSelect select = (SqlSelect) sqlNode;
     SqlNode from = select.getFrom();
-    handlerSql(from, tableInfoMaps, Flag.REAL, level);
+    handlerSql(from, tableInfoMaps, flag, level);
     level.getAndIncrement();
     SqlNode where = select.getWhere();
     handlerSql(where, null, null, level);
@@ -185,7 +192,7 @@ public class ParseSql {
     //      System.out.println("no names");
     //    }
     SqlNode selectList = select.getSelectList();
-    handlerSql(selectList, tableInfoMaps, null, level);
+    handlerSql(selectList, tableInfoMaps, flag, level);
     // TODO 后期处理
     //    SqlNode groupBy = select.getGroup();
     //    handlerSql(groupBy, null, null, level);
@@ -237,15 +244,24 @@ public class ParseSql {
    * @param sqlNode
    * @param tableInfoMaps
    */
-  private void handlerOther(SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps) {
+  private void handlerOther(
+      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
     List<@Nullable SqlNode> list = ((SqlNodeList) sqlNode).getList();
-    TableInfo tableInfo = tableInfoMaps.get(tableInfoMaps.lastKey());
+    TableInfo tableInfo = null;
+    if (Flag.WITH_BODY.equals(flag)) {
+      tableInfo = tableInfoMaps.get("res");
+    } else {
+      tableInfo = tableInfoMaps.get(lastTableName);
+    }
+    lastColumnInfos.clear();
     for (SqlNode node : list) {
       if (SqlKind.AS.equals(node.getKind())) { // 处理列别名
         handlerSql(node, tableInfoMaps, Flag.COLUMN, new AtomicInteger(10000));
       } else {
         ColumnInfo columnInfo = ColumnInfo.builder().columnName(node.toString()).build();
+        lastColumnInfos.add(columnInfo);
         tableInfo.getColumns().add(columnInfo);
+        //        tableInfo.getVirColumns().add(columnInfo);
       }
     }
   }
@@ -263,25 +279,47 @@ public class ParseSql {
       Flag flag,
       AtomicInteger level) {
     SqlIdentifier sqlIdentifier = (SqlIdentifier) sqlNode;
-    TableInfo tableInfo;
+    TableInfo tableInfo = null;
     if (Flag.REAL.equals(flag)) {
-      tableInfo =
-          TableInfo.builder()
-              .tableName(sqlIdentifier.getSimple())
-              .alias(new String())
-              .columns(new ArrayList<>())
-              .level(level.get())
-              .build();
       if (tableInfoMaps.size() == 0 || !tableInfoMaps.containsKey(sqlIdentifier.getSimple())) {
+        tableInfo =
+            TableInfo.builder()
+                .tableName(sqlIdentifier.getSimple())
+                .alias(new String())
+                .columns(new LinkedHashSet<>())
+                //                .virColumns(new LinkedHashSet<>())
+                .level(level.get())
+                .build();
         tableInfoMaps.put(sqlIdentifier.getSimple(), tableInfo);
       }
     } else if (Flag.ALIAS.equals(flag)) {
       tableInfo = tableInfoMaps.get(tableInfoMaps.lastKey());
       tableInfo.setAlias(sqlIdentifier.getSimple());
+    } else if (Flag.WITH_ITEM.equals(flag)) {
+      tableInfo =
+          TableInfo.builder()
+              .tableName(sqlIdentifier.getSimple())
+              .alias(new String())
+              .columns(new LinkedHashSet<>(lastColumnInfos))
+              //              .virColumns(new LinkedHashSet<>(lastColumnInfos))
+              .level(level.get())
+              .build();
+      tableInfoMaps.put(sqlIdentifier.getSimple(), tableInfo);
+    } else if (Flag.WITH_BODY.equals(flag)) {
+      tableInfo =
+          TableInfo.builder()
+              .tableName("res")
+              .alias(new String())
+              .columns(new LinkedHashSet<>())
+              //              .virColumns(new LinkedHashSet<>())
+              .level(level.get())
+              .build();
+      tableInfoMaps.put("res", tableInfo);
     }
+    lastTableName = sqlIdentifier.getSimple();
   }
 
-  public static void main(String[] args) throws SqlParseException {
+  public static void main(String[] args) {
     ParseSql parseSql = new ParseSql();
     parseSql.parseSelect("");
   }

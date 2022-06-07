@@ -72,3 +72,4 @@ digraph G {
 - [ ] queryxxx.sql 都需要测试通过
 - [ ] 解决 join 问题
 - [ ] 后期可以搞一个数据结构将没有表名，但有列名和.的获取到补全列名 (orderby 和 group by)
+- [ ] 高并发下有问题
