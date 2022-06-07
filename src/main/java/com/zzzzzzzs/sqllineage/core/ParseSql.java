@@ -24,7 +24,6 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class ParseSql {
   FrameworkConfig config;
@@ -61,7 +60,7 @@ public class ParseSql {
     // TODO: 高并发下有问题
     init();
     if (sql == null || sql.isEmpty()) {
-      FileReader fileReader = new FileReader("sql/aquery010.sql");
+      FileReader fileReader = new FileReader("sql/aquery004.sql");
       sql = fileReader.readString();
     }
     sql = sql.trim();
@@ -74,12 +73,19 @@ public class ParseSql {
     OrderedMap<String, TableInfo> tableInfoMaps = new ListOrderedMap<>();
     // 默认真实名字
     handlerSql(sqlNode, tableInfoMaps, Flag.REAL);
-    String res = SqlJson.res.replace("$nodes", sqlNodes.toString());
 
-    System.out.println(res);
+    //    String res = SqlJson.res.replace("$nodes", sqlNodes.toString());
+
     //    System.out.println("tableInfoMaps" + jsonSql.writeValueAsString(tableInfoMaps));
-    System.out.println(jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfoMaps));
-    return jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfoMaps);
+    // System.out.println(jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfoMaps));
+    //    return jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfoMaps);
+    return sqlNodes.toString();
+  }
+
+  private void map2Json(OrderedMap<String, TableInfo> tableInfoMaps) {
+    for (String key : tableInfoMaps.keySet()) {
+      TableInfo tableInfo = tableInfoMaps.get(key);
+    }
   }
 
   // handle sqlnode
@@ -256,7 +262,8 @@ public class ParseSql {
     SqlIdentifier sqlIdentifier = (SqlIdentifier) sqlNode;
     TableInfo tableInfo = null;
     int level =
-        Optional.ofNullable(tableInfoMaps.get(lastTableName)).map(TableInfo::getLevel).orElse(0) + 1;
+        Optional.ofNullable(tableInfoMaps.get(lastTableName)).map(TableInfo::getLevel).orElse(0)
+            + 1;
     if (Flag.REAL.equals(flag)) {
       if (tableInfoMaps.size() == 0 || !tableInfoMaps.containsKey(sqlIdentifier.getSimple())) {
         tableInfo =

@@ -13,7 +13,7 @@ public class ParseController {
 
   // parse select
   @RequestMapping(value = "/columnsLineage", method = RequestMethod.GET)
-  public String parseSelect(String sql) throws SqlParseException {
+  public String parseSelect(String sql) {
     String res = parseSql.parseSelect(sql);
 
     return res;
