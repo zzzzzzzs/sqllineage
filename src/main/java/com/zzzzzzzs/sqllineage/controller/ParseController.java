@@ -14,8 +14,7 @@ public class ParseController {
   // parse select
   @RequestMapping(value = "/columnsLineage", method = RequestMethod.GET)
   public String parseSelect(String sql) {
-    String res = parseSql.parseSelect(sql);
-
-    return res;
+    String ret = parseSql.parseSelect(sql);
+    return ret;
   }
 }

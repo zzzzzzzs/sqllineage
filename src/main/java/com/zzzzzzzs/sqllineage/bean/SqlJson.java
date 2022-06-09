@@ -34,10 +34,10 @@ public class SqlJson {
                 {
                   "id": "$tableName",
                   "name": "$tableName",
-                  "type": "Origin",
+                  "type": "$type",
                   "columns": $columns,
-                  "top": 135,
-                  "left": 10
+                  "top": $top,
+                  "left": $left
                 }
                 """;
 }

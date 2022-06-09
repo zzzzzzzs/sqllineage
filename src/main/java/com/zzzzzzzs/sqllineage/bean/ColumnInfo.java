@@ -8,6 +8,6 @@ import lombok.EqualsAndHashCode;
 @Builder
 @EqualsAndHashCode
 public class ColumnInfo {
-  String columnName; // 列名
+  String name; // 列名
   @EqualsAndHashCode.Exclude String alias; // 列别名
 }

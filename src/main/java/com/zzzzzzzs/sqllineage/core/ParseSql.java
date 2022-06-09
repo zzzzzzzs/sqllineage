@@ -1,6 +1,7 @@
 package com.zzzzzzzs.sqllineage.core;
 
 import cn.hutool.core.io.file.FileReader;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.zzzzzzzs.sqllineage.bean.ColumnInfo;
@@ -23,7 +24,9 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 public class ParseSql {
   FrameworkConfig config;
@@ -60,7 +63,7 @@ public class ParseSql {
     // TODO: 高并发下有问题
     init();
     if (sql == null || sql.isEmpty()) {
-      FileReader fileReader = new FileReader("sql/aquery004.sql");
+      FileReader fileReader = new FileReader("sql/aquery010.sql");
       sql = fileReader.readString();
     }
     sql = sql.trim();
@@ -73,19 +76,77 @@ public class ParseSql {
     OrderedMap<String, TableInfo> tableInfoMaps = new ListOrderedMap<>();
     // 默认真实名字
     handlerSql(sqlNode, tableInfoMaps, Flag.REAL);
-
-    //    String res = SqlJson.res.replace("$nodes", sqlNodes.toString());
+    String ret = map2Json(tableInfoMaps);
 
     //    System.out.println("tableInfoMaps" + jsonSql.writeValueAsString(tableInfoMaps));
     // System.out.println(jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfoMaps));
     //    return jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfoMaps);
-    return sqlNodes.toString();
+    return ret;
   }
 
-  private void map2Json(OrderedMap<String, TableInfo> tableInfoMaps) {
-    for (String key : tableInfoMaps.keySet()) {
-      TableInfo tableInfo = tableInfoMaps.get(key);
+  private String map2Json(OrderedMap<String, TableInfo> tableInfoMaps) {
+    try {
+      int lastLevel = 1;
+      int lastTop = 0;
+      int lastLeft = 0;
+      for (Map.Entry<String, TableInfo> entry : tableInfoMaps.entrySet()) {
+        String key = entry.getKey();
+        TableInfo value = entry.getValue();
+
+        String node =
+            SqlJson.nodeStr
+                .replace("$tableName", value.getTableName())
+                .replace(
+                    "$columns",
+                    // jsonSql.writeValueAsString(value.getColumns()));
+                    jsonSql.writeValueAsString(
+                        value.getColumns().stream()
+                            .map(
+                                ele -> {
+                                  try {
+                                    return jsonSql.readTree(
+                                        SqlJson.columnStr.replace(
+                                            "$name",
+                                            ele.getAlias() == null
+                                                ? ele.getName()
+                                                : (ele.getName() + "|" + ele.getAlias())));
+                                  } catch (JsonProcessingException e) {
+                                    e.printStackTrace();
+                                  }
+                                  return null;
+                                })
+                            .toArray()));
+
+        if (1 == value.getLevel()) {
+          node = node.replace("$type", "Origin");
+        } else if ("res" == value.getTableName()) {
+          node = node.replace("$type", "RS");
+        } else {
+          node = node.replace("$type", "Middle");
+        }
+        if (lastLevel == value.getLevel()) {
+          lastTop += 200;
+        } else {
+          lastLevel = value.getLevel();
+          lastTop = 100;
+          lastLeft += 150;
+        }
+        node =
+            node.replace("$top", String.valueOf(lastTop))
+                .replace("$left", String.valueOf(lastLeft));
+
+        // edge
+//        ArrayNode edges = jsonSql.createArrayNode();
+        for (ColumnInfo columnInfo : value.getColumns()) {
+
+        }
+        sqlNodes.add(jsonSql.readTree(node));
+      }
+    } catch (JsonProcessingException e) {
+      e.printStackTrace();
     }
+    String ret = SqlJson.res.replace("$nodes", sqlNodes.toString());
+    return ret;
   }
 
   // handle sqlnode
@@ -210,7 +271,7 @@ public class ParseSql {
     if (Flag.COLUMN.equals(flag)) {
       // 获取最后一个表名
       ColumnInfo columnInfo =
-          ColumnInfo.builder().columnName(left.toString()).alias(right.toString()).build();
+          ColumnInfo.builder().name(left.toString()).alias(right.toString()).build();
       tableInfoMaps.get(tableInfoMaps.lastKey()).getColumns().add(columnInfo);
     } else {
       handlerSql(left, tableInfoMaps, Flag.REAL);
@@ -243,7 +304,7 @@ public class ParseSql {
       if (SqlKind.AS.equals(node.getKind())) { // 处理列别名
         handlerSql(node, tableInfoMaps, Flag.COLUMN);
       } else {
-        ColumnInfo columnInfo = ColumnInfo.builder().columnName(node.toString()).build();
+        ColumnInfo columnInfo = ColumnInfo.builder().name(node.toString()).build();
         lastColumnInfos.add(columnInfo);
         tableInfo.getColumns().add(columnInfo);
       }
