@@ -67,6 +67,8 @@ digraph G {
 
 # 注意
 
+使用 Java17
+
 - [ ] 目前为止，子函数必须有别名
 - [ ] 目前为止，不支持 * 反馈补前面的表名
 - [ ] queryxxx.sql 都需要测试通过
@@ -74,3 +76,8 @@ digraph G {
 - [ ] 后期可以搞一个数据结构将没有表名，但有列名和.的获取到补全列名 (orderby 和 group by)
 - [ ] 高并发下有问题
 - [ ] 先在后端处理好坐标
+
+# 参考
+https://github.com/mizuhokaga/jsplumb-dataLineage-vue
+http://jsfiddle.net/rayflex/La9p4/
+

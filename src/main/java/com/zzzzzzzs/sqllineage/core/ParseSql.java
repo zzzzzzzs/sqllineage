@@ -4,6 +4,9 @@ import cn.hutool.core.io.file.FileReader;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.Maps;
+import com.google.common.collect.Multimap;
 import com.zzzzzzzs.sqllineage.bean.ColumnInfo;
 import com.zzzzzzzs.sqllineage.bean.Flag;
 import com.zzzzzzzs.sqllineage.bean.SqlJson;
@@ -26,7 +29,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 public class ParseSql {
   FrameworkConfig config;
@@ -63,7 +65,7 @@ public class ParseSql {
     // TODO: 高并发下有问题
     init();
     if (sql == null || sql.isEmpty()) {
-      FileReader fileReader = new FileReader("sql/aquery010.sql");
+      FileReader fileReader = new FileReader("sql/aquery009.sql");
       sql = fileReader.readString();
     }
     sql = sql.trim();
@@ -85,10 +87,12 @@ public class ParseSql {
   }
 
   private String map2Json(OrderedMap<String, TableInfo> tableInfoMaps) {
+    String ret = null;
     try {
       int lastLevel = 1;
-      int lastTop = 0;
+      int lastTop = -100;
       int lastLeft = 0;
+
       for (Map.Entry<String, TableInfo> entry : tableInfoMaps.entrySet()) {
         String key = entry.getKey();
         TableInfo value = entry.getValue();
@@ -134,18 +138,53 @@ public class ParseSql {
         node =
             node.replace("$top", String.valueOf(lastTop))
                 .replace("$left", String.valueOf(lastLeft));
-
-        // edge
-//        ArrayNode edges = jsonSql.createArrayNode();
-        for (ColumnInfo columnInfo : value.getColumns()) {
-
-        }
         sqlNodes.add(jsonSql.readTree(node));
       }
+      // edge
+      ArrayNode sqlEdges = jsonSql.createArrayNode();
+      lastLevel = 2;
+      // column, table
+      // 上一次
+      Multimap<String, String> lastColTable = ArrayListMultimap.create();
+      // 本次
+      Multimap<String, String> colTable = ArrayListMultimap.create();
+      for (Map.Entry<String, TableInfo> entry : tableInfoMaps.entrySet()) {
+        String key = entry.getKey();
+        TableInfo value = entry.getValue();
+
+        if (1 == value.getLevel()) {
+          value.getColumns().forEach(el -> lastColTable.put(el.getName(), value.getTableName()));
+          continue;
+        }
+        if ((lastLevel == value.getLevel())) {
+          value.getColumns().forEach(el -> colTable.put(el.getName(), value.getTableName()));
+        } else {
+          lastColTable.clear();
+          lastColTable.putAll(colTable);
+          colTable.clear();
+          value.getColumns().forEach(el -> colTable.put(el.getName(), value.getTableName()));
+          lastLevel++;
+        }
+        for (ColumnInfo el : value.getColumns()) {
+          if (lastColTable.containsKey(el.getName())) {
+            for (String s : lastColTable.get(el.getName())) {
+              System.out.println(s + " " + el.getName() + " " + value.getTableName());
+              sqlEdges.add(
+                  jsonSql.readTree(
+                      SqlJson.edgeStr
+                          .replace("$1", el.getName())
+                          .replace("$2", s)
+                          .replace("$3", el.getName())
+                          .replace("$4", value.getTableName())));
+            }
+          }
+        }
+      }
+      ret =
+          SqlJson.res.replace("$edges", sqlEdges.toString()).replace("$nodes", sqlNodes.toString());
     } catch (JsonProcessingException e) {
       e.printStackTrace();
     }
-    String ret = SqlJson.res.replace("$nodes", sqlNodes.toString());
     return ret;
   }
 

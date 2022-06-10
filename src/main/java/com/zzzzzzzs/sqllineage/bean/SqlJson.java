@@ -4,7 +4,7 @@ package com.zzzzzzzs.sqllineage.bean;
 public class SqlJson {
     public final static String res = """
             {
-              "edges": [],
+              "edges": $edges,
               "nodes": $nodes
             }
             """;
