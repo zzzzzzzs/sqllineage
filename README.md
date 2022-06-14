@@ -1,12 +1,12 @@
-# sqllineage
+# 介绍
 
-# target
+本项目是一个不依赖元数据的 sql 解析器，将最后解析的 sql 血缘关系图展示在页面上。
 
-Parse the SQL and get lineage, and finally display it visually.
+# 使用说明
 
-Parse sql colum is belong to  table.
+在文本框中输入 sql 语句，然后点击渲染接口数据，就可以看到 sql 血缘关系图。
 
-# features
+例如，在文本框输入下面的 sql 语句
 ```sql
 select a.ca_state state, count(*) cnt
 from customer_address a
@@ -32,6 +32,8 @@ having count(*) >= 10
 order by cnt
 limit 100;
 ```
+
+# 解析过程
 
 Binary tree
 
@@ -67,17 +69,22 @@ digraph G {
 
 # 注意
 
-使用 Java17
+- 使用 Java17
+- 尽量将字段写全
+- 子函数要写别名
+- 目前是在后端处理的坐标，后期需要在前端处理
 
-- [ ] 目前为止，子函数必须有别名
-- [ ] 目前为止，不支持 * 反馈补前面的表名
+# 待解决问题
+
+- [ ] 支持 * ，通过谓词，排序，join 条件等反馈补全的表名
 - [ ] queryxxx.sql 都需要测试通过
 - [ ] 解决 join 问题
 - [ ] 后期可以搞一个数据结构将没有表名，但有列名和.的获取到补全列名 (orderby 和 group by)
 - [ ] 高并发下有问题
-- [ ] 先在后端处理好坐标
+- [ ] 在前端处理坐标
 
 # 参考
-https://github.com/mizuhokaga/jsplumb-dataLineage-vue
-http://jsfiddle.net/rayflex/La9p4/
+- 本项目的前端使用了 [此](https://github.com/mizuhokaga/jsplumb-dataLineage-vue) 项目。
+- http://jsfiddle.net/rayflex/La9p4/
+
 

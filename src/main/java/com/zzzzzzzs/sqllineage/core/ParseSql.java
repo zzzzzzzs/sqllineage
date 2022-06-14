@@ -4,13 +4,12 @@ import cn.hutool.core.io.file.FileReader;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Multimap;
+import com.google.common.collect.*;
 import com.zzzzzzzs.sqllineage.bean.ColumnInfo;
 import com.zzzzzzzs.sqllineage.bean.Flag;
 import com.zzzzzzzs.sqllineage.bean.SqlJson;
 import com.zzzzzzzs.sqllineage.bean.TableInfo;
+import com.zzzzzzzs.sqllineage.tuple.Tuple2;
 import lombok.SneakyThrows;
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.avatica.util.Quoting;
@@ -21,8 +20,7 @@ import org.apache.calcite.sql.parser.impl.SqlParserImpl;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
-import org.apache.commons.collections4.OrderedMap;
-import org.apache.commons.collections4.map.ListOrderedMap;
+import org.apache.commons.collections4.map.MultiKeyMap;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.LinkedHashSet;
@@ -35,7 +33,9 @@ public class ParseSql {
   ObjectMapper jsonSql = new ObjectMapper();
   ArrayNode sqlNodes = jsonSql.createArrayNode();
   LinkedHashSet<ColumnInfo> lastColumnInfos = new LinkedHashSet<>(); // 记录上一次的列信息
-  String lastTableName; // 记录上一次的表名
+  //  String lastTableInfo; // 记录上一次的表名
+  // name, alias
+  Tuple2<String, String> lastTableInfo = null; // 记录上一次的表名
 
   public ParseSql() {
     SchemaPlus rootSchema = Frameworks.createRootSchema(true);
@@ -54,7 +54,7 @@ public class ParseSql {
   }
 
   public void init() {
-    lastTableName = "";
+    lastTableInfo = new Tuple2<>();
     lastColumnInfos.clear();
     sqlNodes.removeAll();
   }
@@ -74,122 +74,126 @@ public class ParseSql {
     }
     SqlParser parser = SqlParser.create(sql, config.getParserConfig());
     SqlNode sqlNode = parser.parseStmt();
-    // table, TableInfo
-    OrderedMap<String, TableInfo> tableInfoMaps = new ListOrderedMap<>();
+    //    Table<String, String, TableInfo> tableInfos = new ListMultiKeyMap<>();
+    // table,alias,TableInfo
+    Table<String, String, TableInfo> tableInfos = HashBasedTable.create();
     // 默认真实名字
-    handlerSql(sqlNode, tableInfoMaps, Flag.REAL);
-    String ret = map2Json(tableInfoMaps);
+    handlerSql(sqlNode, tableInfos, Flag.REAL);
+    //    String ret = map2Json(tableInfos);
 
-    //    System.out.println("tableInfoMaps" + jsonSql.writeValueAsString(tableInfoMaps));
-    // System.out.println(jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfoMaps));
-    //    return jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfoMaps);
-    return ret;
+    //    System.out.println("tableInfos" + jsonSql.writeValueAsString(tableInfos));
+    // System.out.println(jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfos));
+    //    return jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfos);
+    return tableInfos.toString();
+    //    return ret;
   }
 
-  private String map2Json(OrderedMap<String, TableInfo> tableInfoMaps) {
-    String ret = null;
-    try {
-      int lastLevel = 1;
-      int lastTop = -100;
-      int lastLeft = 0;
-
-      for (Map.Entry<String, TableInfo> entry : tableInfoMaps.entrySet()) {
-        String key = entry.getKey();
-        TableInfo value = entry.getValue();
-
-        String node =
-            SqlJson.nodeStr
-                .replace("$tableName", value.getTableName())
-                .replace(
-                    "$columns",
-                    // jsonSql.writeValueAsString(value.getColumns()));
-                    jsonSql.writeValueAsString(
-                        value.getColumns().stream()
-                            .map(
-                                ele -> {
-                                  try {
-                                    return jsonSql.readTree(
-                                        SqlJson.columnStr.replace(
-                                            "$name",
-                                            ele.getAlias() == null
-                                                ? ele.getName()
-                                                : (ele.getName() + "|" + ele.getAlias())));
-                                  } catch (JsonProcessingException e) {
-                                    e.printStackTrace();
-                                  }
-                                  return null;
-                                })
-                            .toArray()));
-
-        if (1 == value.getLevel()) {
-          node = node.replace("$type", "Origin");
-        } else if ("res" == value.getTableName()) {
-          node = node.replace("$type", "RS");
-        } else {
-          node = node.replace("$type", "Middle");
-        }
-        if (lastLevel == value.getLevel()) {
-          lastTop += 200;
-        } else {
-          lastLevel = value.getLevel();
-          lastTop = 100;
-          lastLeft += 150;
-        }
-        node =
-            node.replace("$top", String.valueOf(lastTop))
-                .replace("$left", String.valueOf(lastLeft));
-        sqlNodes.add(jsonSql.readTree(node));
-      }
-      // edge
-      ArrayNode sqlEdges = jsonSql.createArrayNode();
-      lastLevel = 2;
-      // column, table
-      // 上一次
-      Multimap<String, String> lastColTable = ArrayListMultimap.create();
-      // 本次
-      Multimap<String, String> colTable = ArrayListMultimap.create();
-      for (Map.Entry<String, TableInfo> entry : tableInfoMaps.entrySet()) {
-        String key = entry.getKey();
-        TableInfo value = entry.getValue();
-
-        if (1 == value.getLevel()) {
-          value.getColumns().forEach(el -> lastColTable.put(el.getName(), value.getTableName()));
-          continue;
-        }
-        if ((lastLevel == value.getLevel())) {
-          value.getColumns().forEach(el -> colTable.put(el.getName(), value.getTableName()));
-        } else {
-          lastColTable.clear();
-          lastColTable.putAll(colTable);
-          colTable.clear();
-          value.getColumns().forEach(el -> colTable.put(el.getName(), value.getTableName()));
-          lastLevel++;
-        }
-        for (ColumnInfo el : value.getColumns()) {
-          if (lastColTable.containsKey(el.getName())) {
-            for (String s : lastColTable.get(el.getName())) {
-              System.out.println(s + " " + el.getName() + " " + value.getTableName());
-              sqlEdges.add(
-                  jsonSql.readTree(
-                      SqlJson.edgeStr
-                          .replace("$1", el.getName())
-                          .replace("$2", s)
-                          .replace("$3", el.getName())
-                          .replace("$4", value.getTableName())));
-            }
-          }
-        }
-      }
-      ret =
-          SqlJson.res.replace("$edges", sqlEdges.toString()).replace("$nodes", sqlNodes.toString());
-    } catch (JsonProcessingException e) {
-      e.printStackTrace();
-    }
-    return ret;
-  }
+  //  private String map2Json(Table<String, String, TableInfo> tableInfos) {
+  //    String ret = null;
+  //    try {
+  //      int lastLevel = 1;
+  //      int lastTop = -100;
+  //      int lastLeft = 0;
+  //
+  //      for (Map.Entry<String, TableInfo> entry : tableInfos.entrySet()) {
+  //        String key = entry.getKey();
+  //        TableInfo value = entry.getValue();
+  //
+  //        String node =
+  //            SqlJson.nodeStr
+  //                .replace("$tableName", value.getTableName())
+  //                .replace(
+  //                    "$columns",
+  //                    // jsonSql.writeValueAsString(value.getColumns()));
+  //                    jsonSql.writeValueAsString(
+  //                        value.getColumns().stream()
+  //                            .map(
+  //                                ele -> {
+  //                                  try {
+  //                                    return jsonSql.readTree(
+  //                                        SqlJson.columnStr.replace(
+  //                                            "$name",
+  //                                            ele.getAlias() == null
+  //                                                ? ele.getName()
+  //                                                : (ele.getName() + "|" + ele.getAlias())));
+  //                                  } catch (JsonProcessingException e) {
+  //                                    e.printStackTrace();
+  //                                  }
+  //                                  return null;
+  //                                })
+  //                            .toArray()));
+  //
+  //        if (1 == value.getLevel()) {
+  //          node = node.replace("$type", "Origin");
+  //        } else if ("res" == value.getTableName()) {
+  //          node = node.replace("$type", "RS");
+  //        } else {
+  //          node = node.replace("$type", "Middle");
+  //        }
+  //        if (lastLevel == value.getLevel()) {
+  //          lastTop += 200;
+  //        } else {
+  //          lastLevel = value.getLevel();
+  //          lastTop = 100;
+  //          lastLeft += 150;
+  //        }
+  //        node =
+  //            node.replace("$top", String.valueOf(lastTop))
+  //                .replace("$left", String.valueOf(lastLeft));
+  //        sqlNodes.add(jsonSql.readTree(node));
+  //      }
+  //      // edge
+  //      ArrayNode sqlEdges = jsonSql.createArrayNode();
+  //      lastLevel = 2;
+  //      // column, table
+  //      // 上一次
+  //      Multimap<String, String> lastColTable = ArrayListMultimap.create();
+  //      // 本次
+  //      Multimap<String, String> colTable = ArrayListMultimap.create();
+  //      for (Map.Entry<String, TableInfo> entry : tableInfos.entrySet()) {
+  //        String key = entry.getKey();
+  //        TableInfo value = entry.getValue();
+  //
+  //        if (1 == value.getLevel()) {
+  //          value.getColumns().forEach(el -> lastColTable.put(el.getName(),
+  // value.getTableName()));
+  //          continue;
+  //        }
+  //        if ((lastLevel == value.getLevel())) {
+  //          value.getColumns().forEach(el -> colTable.put(el.getName(), value.getTableName()));
+  //        } else {
+  //          lastColTable.clear();
+  //          lastColTable.putAll(colTable);
+  //          colTable.clear();
+  //          value.getColumns().forEach(el -> colTable.put(el.getName(), value.getTableName()));
+  //          lastLevel++;
+  //        }
+  //        for (ColumnInfo el : value.getColumns()) {
+  //          if (lastColTable.containsKey(el.getName())) {
+  //            for (String s : lastColTable.get(el.getName())) {
+  //              System.out.println(s + " " + el.getName() + " " + value.getTableName());
+  //              sqlEdges.add(
+  //                  jsonSql.readTree(
+  //                      SqlJson.edgeStr
+  //                          .replace("$1", el.getName())
+  //                          .replace("$2", s)
+  //                          .replace("$3", el.getName())
+  //                          .replace("$4", value.getTableName())));
+  //            }
+  //          }
+  //        }
+  //      }
+  //      ret =
+  //          SqlJson.res.replace("$edges", sqlEdges.toString()).replace("$nodes",
+  // sqlNodes.toString());
+  //    } catch (JsonProcessingException e) {
+  //      e.printStackTrace();
+  //    }
+  //    return ret;
+  //  }
 
   // handle sqlnode
-  private void handlerSql(SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
+  private void handlerSql(SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
     if (sqlNode == null) return;
     SqlKind kind = sqlNode.getKind();
     switch (kind) {
@@ -197,32 +201,32 @@ public class ParseSql {
         handlerInsert(sqlNode);
         break;
       case SELECT:
-        handlerSelect(sqlNode, tableInfoMaps, flag);
+        handlerSelect(sqlNode, tableInfos, flag);
         break;
       case JOIN:
-        handlerJoin(sqlNode, tableInfoMaps);
+        handlerJoin(sqlNode, tableInfos);
         break;
       case AS:
-        handlerAs(sqlNode, tableInfoMaps, flag);
+        handlerAs(sqlNode, tableInfos, flag);
         break;
       case UNION:
         break;
       case ORDER_BY:
-        handlerOrderBy(sqlNode, tableInfoMaps, flag);
+        handlerOrderBy(sqlNode, tableInfos, flag);
         break;
       case WITH:
-        handleWith(sqlNode, tableInfoMaps, flag);
+        handleWith(sqlNode, tableInfos, flag);
         break;
       case WITH_ITEM:
-        handleWithItem(sqlNode, tableInfoMaps, flag);
+        handleWithItem(sqlNode, tableInfos, flag);
         break;
       case IDENTIFIER:
         // 表名
-        handlerIdentifier(sqlNode, tableInfoMaps, flag);
+        handlerIdentifier(sqlNode, tableInfos, flag);
         break;
       case OTHER:
         // 列名
-        handlerOther(sqlNode, tableInfoMaps, flag);
+        handlerOther(sqlNode, tableInfos, flag);
         break;
       default:
         break;
@@ -230,49 +234,48 @@ public class ParseSql {
   }
 
   // handle with
-  private void handleWith(SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
+  private void handleWith(SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
     SqlWith with = (SqlWith) sqlNode;
     List<@Nullable SqlNode> withList = with.withList.getList();
     for (SqlNode node : withList) {
-      handlerSql(node, tableInfoMaps, flag);
+      handlerSql(node, tableInfos, flag);
     }
-    handlerSql(with.body, tableInfoMaps, Flag.WITH_BODY);
+    handlerSql(with.body, tableInfos, Flag.WITH_BODY);
   }
 
   // handler with item
   private void handleWithItem(
-      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
     SqlWithItem withItem = (SqlWithItem) sqlNode;
-    handlerSql(withItem.query, tableInfoMaps, flag);
-    handlerSql(withItem.name, tableInfoMaps, Flag.WITH_ITEM);
+    handlerSql(withItem.query, tableInfos, flag);
+    handlerSql(withItem.name, tableInfos, Flag.WITH_ITEM);
   }
 
   // handle order by
   // TODO 后期可以从 orderBy 中获取到列的名称补全列名
   private void handlerOrderBy(
-      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
     SqlOrderBy orderBy = (SqlOrderBy) sqlNode;
     SqlNode query = orderBy.query;
-    handlerSql(query, tableInfoMaps, flag);
+    handlerSql(query, tableInfos, flag);
   }
 
   // handle join
-  private void handlerJoin(SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps) {
+  private void handlerJoin(SqlNode sqlNode, Table<String, String, TableInfo> tableInfos) {
     SqlJoin join = (SqlJoin) sqlNode;
     SqlNode left = join.getLeft();
     SqlNode right = join.getRight();
 
-    handlerSql(left, tableInfoMaps, Flag.REAL);
-    handlerSql(right, tableInfoMaps, Flag.REAL);
+    handlerSql(left, tableInfos, Flag.REAL);
+    handlerSql(right, tableInfos, Flag.REAL);
   }
 
   // handle select
   private void handlerSelect(
-      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
     SqlSelect select = (SqlSelect) sqlNode;
     SqlNode from = select.getFrom();
-    handlerSql(from, tableInfoMaps, flag);
-    //    level.getAndIncrement();
+    handlerSql(from, tableInfos, flag);
     SqlNode where = select.getWhere();
     handlerSql(where, null, null);
     //    try {
@@ -281,7 +284,7 @@ public class ParseSql {
     //      System.out.println("no names");
     //    }
     SqlNode selectList = select.getSelectList();
-    handlerSql(selectList, tableInfoMaps, flag);
+    handlerSql(selectList, tableInfos, flag);
     // TODO 后期处理
     //    SqlNode groupBy = select.getGroup();
     //    handlerSql(groupBy, null, null);
@@ -300,7 +303,7 @@ public class ParseSql {
     handlerSql(source, null, null);
   }
 
-  private void handlerAs(SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
+  private void handlerAs(SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
     SqlBasicCall sqlBasicCall = (SqlBasicCall) sqlNode;
     List<SqlNode> operandList = sqlBasicCall.getOperandList();
 
@@ -308,17 +311,22 @@ public class ParseSql {
     SqlNode right = operandList.get(1);
 
     if (Flag.COLUMN.equals(flag)) {
-      // 获取最后一个表名
       ColumnInfo columnInfo =
           ColumnInfo.builder().name(left.toString()).alias(right.toString()).build();
-      tableInfoMaps.get(tableInfoMaps.lastKey()).getColumns().add(columnInfo);
+      // 获取最后一个表名
+      tableInfos.row(lastTableInfo.f0).values().stream()
+          .findFirst()
+          .get()
+          .getColumns()
+          .add(columnInfo);
+      //      tableInfos.get(tableInfos.lastKey()).getColumns().add(columnInfo);
     } else {
-      handlerSql(left, tableInfoMaps, Flag.REAL);
+      handlerSql(left, tableInfos, Flag.REAL);
       // 左是名字，那么右就是别名
       if (SqlKind.IDENTIFIER.equals(left.getKind())) {
-        handlerSql(right, tableInfoMaps, Flag.ALIAS);
+        handlerSql(right, tableInfos, Flag.ALIAS);
       } else {
-        handlerSql(right, tableInfoMaps, Flag.REAL);
+        handlerSql(right, tableInfos, Flag.REAL);
       }
     }
   }
@@ -327,21 +335,21 @@ public class ParseSql {
    * 列名，但是包含别名
    *
    * @param sqlNode
-   * @param tableInfoMaps
+   * @param tableInfos
    */
   private void handlerOther(
-      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
     List<@Nullable SqlNode> list = ((SqlNodeList) sqlNode).getList();
     TableInfo tableInfo = null;
     if (Flag.WITH_BODY.equals(flag)) {
-      tableInfo = tableInfoMaps.get("res");
+      //      tableInfo = tableInfos.get("res");
     } else {
-      tableInfo = tableInfoMaps.get(lastTableName);
+      tableInfo = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get();
     }
     lastColumnInfos.clear();
     for (SqlNode node : list) {
       if (SqlKind.AS.equals(node.getKind())) { // 处理列别名
-        handlerSql(node, tableInfoMaps, Flag.COLUMN);
+        handlerSql(node, tableInfos, Flag.COLUMN);
       } else {
         ColumnInfo columnInfo = ColumnInfo.builder().name(node.toString()).build();
         lastColumnInfos.add(columnInfo);
@@ -351,21 +359,25 @@ public class ParseSql {
   }
 
   /**
-   * 目前看起来是表名
+   * 表名
    *
    * @param sqlNode
-   * @param tableInfoMaps
+   * @param tableInfos
    * @param flag 名字标识符
    */
   private void handlerIdentifier(
-      SqlNode sqlNode, OrderedMap<String, TableInfo> tableInfoMaps, Flag flag) {
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
     SqlIdentifier sqlIdentifier = (SqlIdentifier) sqlNode;
     TableInfo tableInfo = null;
-    int level =
-        Optional.ofNullable(tableInfoMaps.get(lastTableName)).map(TableInfo::getLevel).orElse(0)
-            + 1;
+    int level = 0;
+    if (tableInfos.containsRow(lastTableInfo.f0)) {
+      level = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get().getLevel() + 1;
+    } else {
+      level = 1;
+    }
     if (Flag.REAL.equals(flag)) {
-      if (tableInfoMaps.size() == 0 || !tableInfoMaps.containsKey(sqlIdentifier.getSimple())) {
+      // 第一次遇到真实表命名
+      if (tableInfos.isEmpty() || tableInfos.row(sqlIdentifier.getSimple()).size() == 0) {
         tableInfo =
             TableInfo.builder()
                 .tableName(sqlIdentifier.getSimple())
@@ -373,11 +385,15 @@ public class ParseSql {
                 .columns(new LinkedHashSet<>())
                 .level(level)
                 .build();
-        tableInfoMaps.put(sqlIdentifier.getSimple(), tableInfo);
+        tableInfos.put(sqlIdentifier.getSimple(), "", tableInfo);
       }
+      lastTableInfo.f0 = sqlIdentifier.getSimple();
     } else if (Flag.ALIAS.equals(flag)) {
-      tableInfo = tableInfoMaps.get(tableInfoMaps.lastKey());
+      tableInfo = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get();
       tableInfo.setAlias(sqlIdentifier.getSimple());
+      lastTableInfo.f1 = sqlIdentifier.getSimple();
+      tableInfos.remove(lastTableInfo.f0, lastTableInfo.f1);
+      tableInfos.put(lastTableInfo.f0, lastTableInfo.f1, tableInfo);
     } else if (Flag.WITH_ITEM.equals(flag)) {
       tableInfo =
           TableInfo.builder()
@@ -386,18 +402,18 @@ public class ParseSql {
               .columns(new LinkedHashSet<>(lastColumnInfos))
               .level(level)
               .build();
-      tableInfoMaps.put(sqlIdentifier.getSimple(), tableInfo);
+      //      tableInfos.put(sqlIdentifier.getSimple(), tableInfo);
     } else if (Flag.WITH_BODY.equals(flag)) {
-      tableInfo =
-          TableInfo.builder()
-              .tableName("res")
-              .alias(new String())
-              .columns(new LinkedHashSet<>())
-              .level(level)
-              .build();
-      tableInfoMaps.put("res", tableInfo);
+      //      tableInfo =
+      //          TableInfo.builder()
+      //              .tableName("res")
+      //              .alias(new String())
+      //              .columns(new LinkedHashSet<>())
+      //              .level(level)
+      //              .build();
+      //      tableInfos.put("res", tableInfo);
     }
-    lastTableName = sqlIdentifier.getSimple();
+    //        lastTableName = sqlIdentifier.getSimple();
   }
 
   public static void main(String[] args) {
