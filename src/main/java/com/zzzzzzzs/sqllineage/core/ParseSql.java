@@ -1,13 +1,11 @@
 package com.zzzzzzzs.sqllineage.core;
 
 import cn.hutool.core.io.file.FileReader;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.google.common.collect.*;
+import com.google.common.collect.HashBasedTable;
+import com.google.common.collect.Table;
 import com.zzzzzzzs.sqllineage.bean.ColumnInfo;
-import com.zzzzzzzs.sqllineage.bean.Flag;
-import com.zzzzzzzs.sqllineage.bean.SqlJson;
 import com.zzzzzzzs.sqllineage.bean.TableInfo;
 import com.zzzzzzzs.sqllineage.tuple.Tuple2;
 import lombok.SneakyThrows;
@@ -20,13 +18,10 @@ import org.apache.calcite.sql.parser.impl.SqlParserImpl;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
-import org.apache.commons.collections4.map.MultiKeyMap;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
+import java.util.function.Supplier;
 
 public class ParseSql {
   FrameworkConfig config;
@@ -36,8 +31,21 @@ public class ParseSql {
   //  String lastTableInfo; // 记录上一次的表名
   // name, alias
   Tuple2<String, String> lastTableInfo = null; // 记录上一次的表名
+  private Map<Tuple2<String, String>, HandlerSql<String, String, Table<String, String, TableInfo>>>
+      stateMachine = new HashMap<>();
 
+  // 有限状态机
   public ParseSql() {
+    stateMachine.put(
+        Tuple2.of("INIT", "table"),
+        (var1, var2) -> {
+          return var1.toString();
+        });
+
+//    stateMachine.put(Tuple2.of("table", "real"), (var1, var2) -> {
+//      return var1.toString();
+//    });
+
     SchemaPlus rootSchema = Frameworks.createRootSchema(true);
     config =
         Frameworks.newConfigBuilder()
@@ -78,7 +86,7 @@ public class ParseSql {
     // table,alias,TableInfo
     Table<String, String, TableInfo> tableInfos = HashBasedTable.create();
     // 默认真实名字
-    handlerSql(sqlNode, tableInfos, Flag.REAL);
+    handlerSql(sqlNode, tableInfos, new LinkedList<>(List.of("INIT")));
     //    String ret = map2Json(tableInfos);
 
     //    System.out.println("tableInfos" + jsonSql.writeValueAsString(tableInfos));
@@ -193,7 +201,8 @@ public class ParseSql {
   //  }
 
   // handle sqlnode
-  private void handlerSql(SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
+  private void handlerSql(
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, LinkedList<String> flags) {
     if (sqlNode == null) return;
     SqlKind kind = sqlNode.getKind();
     switch (kind) {
@@ -201,32 +210,32 @@ public class ParseSql {
         handlerInsert(sqlNode);
         break;
       case SELECT:
-        handlerSelect(sqlNode, tableInfos, flag);
+        handlerSelect(sqlNode, tableInfos, flags);
         break;
       case JOIN:
-        handlerJoin(sqlNode, tableInfos);
+        handlerJoin(sqlNode, tableInfos, flags);
         break;
       case AS:
-        handlerAs(sqlNode, tableInfos, flag);
+        handlerAs(sqlNode, tableInfos, flags);
         break;
       case UNION:
         break;
       case ORDER_BY:
-        handlerOrderBy(sqlNode, tableInfos, flag);
+        handlerOrderBy(sqlNode, tableInfos, flags);
         break;
       case WITH:
-        handleWith(sqlNode, tableInfos, flag);
+        handleWith(sqlNode, tableInfos, flags);
         break;
       case WITH_ITEM:
-        handleWithItem(sqlNode, tableInfos, flag);
+        handleWithItem(sqlNode, tableInfos, flags);
         break;
       case IDENTIFIER:
         // 表名
-        handlerIdentifier(sqlNode, tableInfos, flag);
+        handlerIdentifier(sqlNode, tableInfos, flags);
         break;
       case OTHER:
         // 列名
-        handlerOther(sqlNode, tableInfos, flag);
+        handlerOther(sqlNode, tableInfos, flags);
         break;
       default:
         break;
@@ -234,48 +243,51 @@ public class ParseSql {
   }
 
   // handle with
-  private void handleWith(SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
+  private void handleWith(
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, LinkedList<String> flags) {
     SqlWith with = (SqlWith) sqlNode;
     List<@Nullable SqlNode> withList = with.withList.getList();
     for (SqlNode node : withList) {
-      handlerSql(node, tableInfos, flag);
+      handlerSql(node, tableInfos, flags);
     }
-    handlerSql(with.body, tableInfos, Flag.WITH_BODY);
+    handlerSql(with.body, tableInfos, null);
   }
 
   // handler with item
   private void handleWithItem(
-      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, LinkedList<String> flags) {
     SqlWithItem withItem = (SqlWithItem) sqlNode;
-    handlerSql(withItem.query, tableInfos, flag);
-    handlerSql(withItem.name, tableInfos, Flag.WITH_ITEM);
+    handlerSql(withItem.query, tableInfos, flags);
+    handlerSql(withItem.name, tableInfos, null);
   }
 
   // handle order by
   // TODO 后期可以从 orderBy 中获取到列的名称补全列名
   private void handlerOrderBy(
-      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, LinkedList<String> flags) {
     SqlOrderBy orderBy = (SqlOrderBy) sqlNode;
     SqlNode query = orderBy.query;
-    handlerSql(query, tableInfos, flag);
+    handlerSql(query, tableInfos, flags);
   }
 
   // handle join
-  private void handlerJoin(SqlNode sqlNode, Table<String, String, TableInfo> tableInfos) {
+  private void handlerJoin(
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, LinkedList<String> flags) {
     SqlJoin join = (SqlJoin) sqlNode;
     SqlNode left = join.getLeft();
     SqlNode right = join.getRight();
-
-    handlerSql(left, tableInfos, Flag.REAL);
-    handlerSql(right, tableInfos, Flag.REAL);
+    flags.add("join");
+    handlerSql(left, tableInfos, flags);
+    handlerSql(right, tableInfos, flags);
   }
 
   // handle select
   private void handlerSelect(
-      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, LinkedList<String> flags) {
     SqlSelect select = (SqlSelect) sqlNode;
     SqlNode from = select.getFrom();
-    handlerSql(from, tableInfos, flag);
+    flags.add("table");
+    handlerSql(from, tableInfos, flags);
     SqlNode where = select.getWhere();
     handlerSql(where, null, null);
     //    try {
@@ -284,7 +296,7 @@ public class ParseSql {
     //      System.out.println("no names");
     //    }
     SqlNode selectList = select.getSelectList();
-    handlerSql(selectList, tableInfos, flag);
+    handlerSql(selectList, tableInfos, flags);
     // TODO 后期处理
     //    SqlNode groupBy = select.getGroup();
     //    handlerSql(groupBy, null, null);
@@ -303,32 +315,37 @@ public class ParseSql {
     handlerSql(source, null, null);
   }
 
-  private void handlerAs(SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
+  private void handlerAs(
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, LinkedList<String> flags) {
     SqlBasicCall sqlBasicCall = (SqlBasicCall) sqlNode;
     List<SqlNode> operandList = sqlBasicCall.getOperandList();
 
     SqlNode left = operandList.get(0);
+    flags.add("real");
+    handlerSql(left, tableInfos, flags);
     SqlNode right = operandList.get(1);
+    flags.add("as");
+    handlerSql(right, tableInfos, flags);
 
-    if (Flag.COLUMN.equals(flag)) {
-      ColumnInfo columnInfo =
-          ColumnInfo.builder().name(left.toString()).alias(right.toString()).build();
-      // 获取最后一个表名
-      tableInfos.row(lastTableInfo.f0).values().stream()
-          .findFirst()
-          .get()
-          .getColumns()
-          .add(columnInfo);
-      //      tableInfos.get(tableInfos.lastKey()).getColumns().add(columnInfo);
-    } else {
-      handlerSql(left, tableInfos, Flag.REAL);
-      // 左是名字，那么右就是别名
-      if (SqlKind.IDENTIFIER.equals(left.getKind())) {
-        handlerSql(right, tableInfos, Flag.ALIAS);
-      } else {
-        handlerSql(right, tableInfos, Flag.REAL);
-      }
-    }
+    //    if (Flag.COLUMN.equals(flag)) {
+    //      ColumnInfo columnInfo =
+    //          ColumnInfo.builder().name(left.toString()).alias(right.toString()).build();
+    //      // 获取最后一个表名
+    //      tableInfos.row(lastTableInfo.f0).values().stream()
+    //          .findFirst()
+    //          .get()
+    //          .getColumns()
+    //          .add(columnInfo);
+    //      //      tableInfos.get(tableInfos.lastKey()).getColumns().add(columnInfo);
+    //    } else {
+    //      handlerSql(left, tableInfos, Flag.REAL);
+    //      // 左是名字，那么右就是别名
+    //      if (SqlKind.IDENTIFIER.equals(left.getKind())) {
+    //        handlerSql(right, tableInfos, Flag.ALIAS);
+    //      } else {
+    //        handlerSql(right, tableInfos, Flag.REAL);
+    //      }
+    //    }
   }
 
   /**
@@ -338,18 +355,18 @@ public class ParseSql {
    * @param tableInfos
    */
   private void handlerOther(
-      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, LinkedList<String> flags) {
     List<@Nullable SqlNode> list = ((SqlNodeList) sqlNode).getList();
     TableInfo tableInfo = null;
-    if (Flag.WITH_BODY.equals(flag)) {
-      //      tableInfo = tableInfos.get("res");
-    } else {
-      tableInfo = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get();
-    }
+    //    if (Flag.WITH_BODY.equals(flag)) {
+    //      //      tableInfo = tableInfos.get("res");
+    //    } else {
+    //      tableInfo = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get();
+    //    }
     lastColumnInfos.clear();
     for (SqlNode node : list) {
       if (SqlKind.AS.equals(node.getKind())) { // 处理列别名
-        handlerSql(node, tableInfos, Flag.COLUMN);
+        handlerSql(node, tableInfos, null);
       } else {
         ColumnInfo columnInfo = ColumnInfo.builder().name(node.toString()).build();
         lastColumnInfos.add(columnInfo);
@@ -363,56 +380,66 @@ public class ParseSql {
    *
    * @param sqlNode
    * @param tableInfos
-   * @param flag 名字标识符
+   * @param flags 名字标识符
    */
   private void handlerIdentifier(
-      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, Flag flag) {
+      SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, LinkedList<String> flags) {
     SqlIdentifier sqlIdentifier = (SqlIdentifier) sqlNode;
     TableInfo tableInfo = null;
-    int level = 0;
-    if (tableInfos.containsRow(lastTableInfo.f0)) {
-      level = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get().getLevel() + 1;
-    } else {
-      level = 1;
-    }
-    if (Flag.REAL.equals(flag)) {
-      // 第一次遇到真实表命名
-      if (tableInfos.isEmpty() || tableInfos.row(sqlIdentifier.getSimple()).size() == 0) {
-        tableInfo =
-            TableInfo.builder()
-                .tableName(sqlIdentifier.getSimple())
-                .alias(new String())
-                .columns(new LinkedHashSet<>())
-                .level(level)
-                .build();
-        tableInfos.put(sqlIdentifier.getSimple(), "", tableInfo);
-      }
-      lastTableInfo.f0 = sqlIdentifier.getSimple();
-    } else if (Flag.ALIAS.equals(flag)) {
-      tableInfo = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get();
-      tableInfo.setAlias(sqlIdentifier.getSimple());
-      lastTableInfo.f1 = sqlIdentifier.getSimple();
-      tableInfos.remove(lastTableInfo.f0, lastTableInfo.f1);
-      tableInfos.put(lastTableInfo.f0, lastTableInfo.f1, tableInfo);
-    } else if (Flag.WITH_ITEM.equals(flag)) {
-      tableInfo =
-          TableInfo.builder()
-              .tableName(sqlIdentifier.getSimple())
-              .alias(new String())
-              .columns(new LinkedHashSet<>(lastColumnInfos))
-              .level(level)
-              .build();
-      //      tableInfos.put(sqlIdentifier.getSimple(), tableInfo);
-    } else if (Flag.WITH_BODY.equals(flag)) {
-      //      tableInfo =
-      //          TableInfo.builder()
-      //              .tableName("res")
-      //              .alias(new String())
-      //              .columns(new LinkedHashSet<>())
-      //              .level(level)
-      //              .build();
-      //      tableInfos.put("res", tableInfo);
-    }
+    //    int level = 0;
+    //    if (tableInfos.containsRow(lastTableInfo.f0)) {
+    //      level = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get().getLevel()
+    // + 1;
+    //    } else {
+    //      level = 1;
+    //    }
+//    for (int i = 0, size = flags.size() - 1; i < size; i++) {
+//      stateMachine
+//          .get(Tuple2.of(flags.get(0), flags.get(1)))
+//          .handler(sqlIdentifier.getSimple(), tableInfos);
+//    }
+
+    //    stack.add()
+    //    String nextState = stateMachine.get(Tuple2.of(flags., event.eventType)).get();
+    flags.removeLast();
+    //    if (Flag.REAL.equals(flag)) {
+    //      // 第一次遇到真实表命名
+    //      if (tableInfos.isEmpty() || tableInfos.row(sqlIdentifier.getSimple()).size() == 0) {
+    //        tableInfo =
+    //            TableInfo.builder()
+    //                .tableName(sqlIdentifier.getSimple())
+    //                .alias(new String())
+    //                .columns(new LinkedHashSet<>())
+    //                .level(level)
+    //                .build();
+    //        tableInfos.put(sqlIdentifier.getSimple(), "", tableInfo);
+    //      }
+    //      lastTableInfo.f0 = sqlIdentifier.getSimple();
+    //    } else if (Flag.ALIAS.equals(flag)) {
+    //      tableInfo = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get();
+    //      tableInfo.setAlias(sqlIdentifier.getSimple());
+    //      lastTableInfo.f1 = sqlIdentifier.getSimple();
+    //      tableInfos.remove(lastTableInfo.f0, lastTableInfo.f1);
+    //      tableInfos.put(lastTableInfo.f0, lastTableInfo.f1, tableInfo);
+    //    } else if (Flag.WITH_ITEM.equals(flag)) {
+    //      tableInfo =
+    //          TableInfo.builder()
+    //              .tableName(sqlIdentifier.getSimple())
+    //              .alias(new String())
+    //              .columns(new LinkedHashSet<>(lastColumnInfos))
+    //              .level(level)
+    //              .build();
+    //      //      tableInfos.put(sqlIdentifier.getSimple(), tableInfo);
+    //    } else if (Flag.WITH_BODY.equals(flag)) {
+    //      //      tableInfo =
+    //      //          TableInfo.builder()
+    //      //              .tableName("res")
+    //      //              .alias(new String())
+    //      //              .columns(new LinkedHashSet<>())
+    //      //              .level(level)
+    //      //              .build();
+    //      //      tableInfos.put("res", tableInfo);
+    //    }
     //        lastTableName = sqlIdentifier.getSimple();
   }
 

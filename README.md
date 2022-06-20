@@ -67,6 +67,15 @@ digraph G {
 )
 
 
+
+# 有限状态机
+
+<details>   <summary>折叠文本</summary>   此处可书写文本   嗯，是可以书写文本的 </details>
+
+
+
+
+
 # 注意
 
 - 使用 Java17
@@ -86,5 +95,4 @@ digraph G {
 # 参考
 - 本项目的前端使用了 [此](https://github.com/mizuhokaga/jsplumb-dataLineage-vue) 项目。
 - http://jsfiddle.net/rayflex/La9p4/
-
 
