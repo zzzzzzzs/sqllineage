@@ -73,7 +73,29 @@ digraph G {
 <details>   <summary>折叠文本</summary>   此处可书写文本   嗯，是可以书写文本的 </details>
 
 
-
+![Alt text](https://g.gravizo.com/g?
+digraph G {
+    rankdir = TB;
+    size = "8,5"
+    node [shape = box];
+    INIT [label="INITIAL"];
+    TABLE [label="TABLE"];
+    JOIN [label="JOIN"];
+    REAL [label="REAL"];
+    REST [label="REST"];
+    RESC [label="RESC"];
+    INIT -> TABLE [ label = "table"];
+    TABLE -> REST [ label = "real"];
+    TABLE -> REAL [ label = "real"];
+    REAL -> REST [ label = "as"];
+    TABLE -> JOIN [ label = "join"];
+    JOIN -> REST [ label = "real"];
+    INIT -> COLUMN [ label = "column"]
+    COLUMN -> RESC [label = "real"]
+    COLUMN -> REAL [label = "real"]
+    REAL -> RESC [label = "as"]
+}
+)
 
 
 # 注意

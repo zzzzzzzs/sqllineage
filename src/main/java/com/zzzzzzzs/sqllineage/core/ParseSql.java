@@ -31,6 +31,7 @@ public class ParseSql {
   //  String lastTableInfo; // 记录上一次的表名
   // name, alias
   Tuple2<String, String> lastTableInfo = null; // 记录上一次的表名
+  // 有限状态机
   private Map<Tuple2<String, String>, HandlerSql<String, String, Table<String, String, TableInfo>>>
       stateMachine = new HashMap<>();
 
@@ -38,13 +39,44 @@ public class ParseSql {
   public ParseSql() {
     stateMachine.put(
         Tuple2.of("INIT", "table"),
-        (var1, var2) -> {
+        // real table, tableInfos
+        (var1, tableInfos) -> {
           return var1.toString();
         });
 
-//    stateMachine.put(Tuple2.of("table", "real"), (var1, var2) -> {
-//      return var1.toString();
-//    });
+    stateMachine.put(
+        Tuple2.of("table", "real"),
+        // real table, tableInfos
+        (var1, tableInfos) -> {
+          int level = 0;
+          if (tableInfos.containsRow(lastTableInfo.f0)) {
+            level =
+                tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get().getLevel() + 1;
+          } else {
+            level = 1;
+          }
+          TableInfo tableInfo =
+              TableInfo.builder()
+                  .tableName(var1)
+                  .alias("")
+                  .columns(new LinkedHashSet<>())
+                  .level(level)
+                  .build();
+          tableInfos.put(var1, "", tableInfo);
+          lastTableInfo.f0 = var1;
+          return var1.toString();
+        });
+    stateMachine.put(
+        Tuple2.of("real", "as"),
+        // alias, tableInfos
+        (var1, tableInfos) -> {
+          TableInfo tableInfo = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get();
+          tableInfo.setAlias(var1);
+          lastTableInfo.f1 = var1;
+          tableInfos.remove(lastTableInfo.f0, lastTableInfo.f1);
+          tableInfos.put(lastTableInfo.f0, lastTableInfo.f1, tableInfo);
+          return var1.toString();
+        });
 
     SchemaPlus rootSchema = Frameworks.createRootSchema(true);
     config =
@@ -82,7 +114,6 @@ public class ParseSql {
     }
     SqlParser parser = SqlParser.create(sql, config.getParserConfig());
     SqlNode sqlNode = parser.parseStmt();
-    //    Table<String, String, TableInfo> tableInfos = new ListMultiKeyMap<>();
     // table,alias,TableInfo
     Table<String, String, TableInfo> tableInfos = HashBasedTable.create();
     // 默认真实名字
@@ -286,7 +317,7 @@ public class ParseSql {
       SqlNode sqlNode, Table<String, String, TableInfo> tableInfos, LinkedList<String> flags) {
     SqlSelect select = (SqlSelect) sqlNode;
     SqlNode from = select.getFrom();
-    flags.add("table");
+    flags.addAll(List.of("table", "real"));
     handlerSql(from, tableInfos, flags);
     SqlNode where = select.getWhere();
     handlerSql(where, null, null);
@@ -295,6 +326,8 @@ public class ParseSql {
     //    } catch (NoSuchFieldException e) {
     //      System.out.println("no names");
     //    }
+    flags.clear();
+    flags.addAll(List.of("INIT", "column", "real"));
     SqlNode selectList = select.getSelectList();
     handlerSql(selectList, tableInfos, flags);
     // TODO 后期处理
@@ -321,7 +354,6 @@ public class ParseSql {
     List<SqlNode> operandList = sqlBasicCall.getOperandList();
 
     SqlNode left = operandList.get(0);
-    flags.add("real");
     handlerSql(left, tableInfos, flags);
     SqlNode right = operandList.get(1);
     flags.add("as");
@@ -363,16 +395,22 @@ public class ParseSql {
     //    } else {
     //      tableInfo = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get();
     //    }
-    lastColumnInfos.clear();
-    for (SqlNode node : list) {
-      if (SqlKind.AS.equals(node.getKind())) { // 处理列别名
-        handlerSql(node, tableInfos, null);
-      } else {
-        ColumnInfo columnInfo = ColumnInfo.builder().name(node.toString()).build();
-        lastColumnInfos.add(columnInfo);
-        tableInfo.getColumns().add(columnInfo);
-      }
+    for (int i = 0, size = flags.size() - 1; i < size; i++) {
+      System.out.println(flags.get(i) + ":" + flags.get(i + 1));
     }
+    for (SqlNode node : list) {
+      handlerSql(node, tableInfos, flags);
+    }
+    //    lastColumnInfos.clear();
+    //    for (SqlNode node : list) {
+    //      if (SqlKind.AS.equals(node.getKind())) { // 处理列别名
+    //        handlerSql(node, tableInfos, null);
+    //      } else {
+    //        ColumnInfo columnInfo = ColumnInfo.builder().name(node.toString()).build();
+    //        lastColumnInfos.add(columnInfo);
+    //        tableInfo.getColumns().add(columnInfo);
+    //      }
+    //    }
   }
 
   /**
@@ -393,15 +431,14 @@ public class ParseSql {
     //    } else {
     //      level = 1;
     //    }
-//    for (int i = 0, size = flags.size() - 1; i < size; i++) {
-//      stateMachine
-//          .get(Tuple2.of(flags.get(0), flags.get(1)))
-//          .handler(sqlIdentifier.getSimple(), tableInfos);
-//    }
+    for (int i = 0, size = flags.size() - 1; i < size; i++) {
+      System.out.println(flags.get(i) + ":" + flags.get(i + 1));
+      stateMachine
+          .get(Tuple2.of(flags.get(i), flags.get(i + 1)))
+          .handler(sqlIdentifier.getSimple(), tableInfos);
+    }
 
-    //    stack.add()
     //    String nextState = stateMachine.get(Tuple2.of(flags., event.eventType)).get();
-    flags.removeLast();
     //    if (Flag.REAL.equals(flag)) {
     //      // 第一次遇到真实表命名
     //      if (tableInfos.isEmpty() || tableInfos.row(sqlIdentifier.getSimple()).size() == 0) {
