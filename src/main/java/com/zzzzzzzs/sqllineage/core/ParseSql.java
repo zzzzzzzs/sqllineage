@@ -5,7 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Table;
+import com.jparams.store.Store;
+import com.jparams.store.memory.MemoryStore;
 import com.zzzzzzzs.sqllineage.bean.ColumnInfo;
+import com.zzzzzzzs.sqllineage.bean.SqlInfo;
 import com.zzzzzzzs.sqllineage.bean.TableInfo;
 import com.zzzzzzzs.sqllineage.tuple.Tuple2;
 import lombok.SneakyThrows;
@@ -115,7 +118,11 @@ public class ParseSql {
     SqlParser parser = SqlParser.create(sql, config.getParserConfig());
     SqlNode sqlNode = parser.parseStmt();
     // table,alias,TableInfo
-    Table<String, String, TableInfo> tableInfos = HashBasedTable.create();
+//    Table<String, String, TableInfo> tableInfos = HashBasedTable.create();
+    Store<SqlInfo> sqlInfoStore = new MemoryStore<>();
+    sqlInfoStore.index("tableName", SqlInfo::getTableName)
+
+    ;
     // 默认真实名字
     handlerSql(sqlNode, tableInfos, new LinkedList<>(List.of("INIT")));
     //    String ret = map2Json(tableInfos);
