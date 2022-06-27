@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.zzzzzzzs.sqllineage.bean.*;
 import com.zzzzzzzs.sqllineage.tuple.Tuple2;
+import com.zzzzzzzs.sqllineage.tuple.Tuple3;
 import lombok.SneakyThrows;
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.avatica.util.Quoting;
@@ -26,7 +27,7 @@ public class ParseSql {
   ArrayNode sqlNodes = jsonSql.createArrayNode();
   LinkedHashSet<ColumnInfo> lastColumnInfos = new LinkedHashSet<>(); // 记录上一次的列信息
   //  String lastTableInfo; // 记录上一次的表名
-  // name, alias
+  // tableName, tableAlias
   Tuple2<String, String> lastTableInfo = null; // 记录上一次的表名
   // 有限状态机
   //  private Map<Tuple2<String, String>, HandlerSql<String, String, Table<String, String,
@@ -351,16 +352,9 @@ public class ParseSql {
     SqlNode left = operandList.get(0);
     SqlNode right = operandList.get(1);
 
-    if (Flag.COLUMN.equals(flags)) {
-      //      ColumnInfo columnInfo =
-      //          ColumnInfo.builder().name(left.toString()).alias(right.toString()).build();
-      // 获取最后一个表名
-      //      tableInfos.row(lastTableInfo.f0).values().stream()
-      //          .findFirst()
-      //          .get()
-      //          .getColumns()
-      //          .add(columnInfo);
-      //      tableInfos.get(tableInfos.lastKey()).getColumns().add(columnInfo);
+    if (Flag.COLUMN.equals(flags)) { // 列名 & REAL
+      handlerSql(left, table, uuid, Flag.COLUMN_REAL);
+      handlerSql(right, table, uuid, Flag.COLUMN_ALIAS);
     } else {
       handlerSql(left, table, uuid, Flag.REAL);
       // 左是名字，那么右就是别名，否则就是子函数
@@ -389,44 +383,39 @@ public class ParseSql {
     //    lastColumnInfos.clear();
     for (SqlNode node : list) {
       if (SqlKind.AS.equals(node.getKind())) { // 处理列别名
-        handlerSql(node, table, uuid, null);
+        handlerSql(node, table, uuid, Flag.COLUMN);
       } else {
         List<SqlInfo> sqlInfos =
             table.selectWhere(
-                "uuid, tableName, tableAlias", uuid, lastTableInfo.f0, lastTableInfo.f1);
-        //        List<SqlInfo> sqlInfos =
-        //            table
-        //                .get(
-        //                    Query.where("uuid", uuid)
-        //                        .and("tableName", lastTableInfo.f0)
-        //                        .and("tableAlias", lastTableInfo.f1))
-        //                .stream()
-        //                .filter(c -> c.getColumnName() == null)
-        //                .map(
-        //                    c -> {
-        //                      c.setColumnName(node.toString());
-        //                      return c;
-        //                    })
-        //                .collect(Collectors.toList());
-        if (sqlInfos.isEmpty()) {
+                "uuid,tableName,tableAlias", uuid, lastTableInfo.f0, lastTableInfo.f1);
+        int level = sqlInfos.stream().mapToInt(SqlInfo::getLevel).max().getAsInt();
+        // columnName 为 null 的
+        List<SqlInfo> sqlInfos1 =
+            sqlInfos.stream()
+                .filter(c -> c.getColumnName() == null)
+                .map(
+                    c -> {
+                      c.setColumnName(node.toString());
+                      return c;
+                    })
+                .collect(Collectors.toList());
+        if (sqlInfos1.isEmpty()) {
           SqlInfo sqlInfo =
               SqlInfo.builder()
                   .uuid(uuid)
                   .tableName(lastTableInfo.f0)
                   .tableAlias(lastTableInfo.f1)
                   .columnName(node.toString())
+                  .level(level)
                   .build();
-          //          table.add(sqlInfo);
+          table.insert(sqlInfo);
         }
-        //        ColumnInfo columnInfo = ColumnInfo.builder().name(node.toString()).build();
-        //        lastColumnInfos.add(columnInfo);
-        //        tableInfo.getColumns().add(columnInfo);
       }
     }
   }
 
   /**
-   * 表名
+   * 表名 & 列名
    *
    * @param sqlNode
    * @param table
@@ -451,7 +440,37 @@ public class ParseSql {
       lastTableInfo.f1 = sqlIdentifier.getSimple();
       table.selectWhere("uuid,tableName", uuid, lastTableInfo.f0).stream()
           .forEach(c -> c.setTableAlias(lastTableInfo.f1));
+    } else if (Flag.COLUMN_REAL.equals(flag)) {
+      Optional<SqlInfo> sqlInfoOpt =
+          table
+              .selectWhere("uuid,tableName,tableAlias", uuid, lastTableInfo.f0, lastTableInfo.f1)
+              .stream()
+              .findFirst();
+      sqlInfoOpt
+          .map(
+              c -> {
+                if (c.getColumnName() == null) {
+                  c.setColumnName(sqlIdentifier.getSimple());
+                  return null;
+                } else {
+                  SqlInfo sqlInfo =
+                      SqlInfo.builder()
+                          .uuid(uuid)
+                          .tableName(lastTableInfo.f0)
+                          .tableAlias(lastTableInfo.f1)
+                          .columnName(sqlIdentifier.getSimple())
+                          .level(level)
+                          .build();
+                  return sqlInfo;
+                }
+              })
+          .ifPresent(table::insert);
+    } else if (Flag.COLUMN_ALIAS.equals(flag)) {
+      table.selectWhere("uuid", uuid).stream()
+          .max(Comparator.comparing(SqlInfo::getId))
+          .ifPresent(c -> c.setColumnAlias(sqlIdentifier.getSimple()));
     }
+
     //    String nextState = stateMachine.get(Tuple2.of(flags., event.eventType)).get();
     //    if (Flag.REAL.equals(flag)) {
     //      // 第一次遇到真实表命名

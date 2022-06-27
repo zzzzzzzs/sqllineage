@@ -11,18 +11,12 @@ import java.util.List;
 public class Table<V> {
   // colName,<index, Type>
   private LinkedHashMap<String, Tuple2<Integer, String>> colNames = new LinkedHashMap<>(); // 存储列名
+  // colName, num
+  private Tuple2<String, Integer> autoInc = null;
   private List<V> colVs = new ArrayList<>(); // 存储列值
   private boolean sorted = false; // 是否已排序
-  private boolean isAutoInc = false; // 是否自增
-  // 自增序列
-  private int autoInc = 1;
 
   public Table() {}
-
-  // 是否设置自增序列
-  public Table(boolean isAutoInc) {
-    this.isAutoInc = isAutoInc;
-  }
 
   private String getType(Field type) {
     return type.getType().getSimpleName();
@@ -32,6 +26,10 @@ public class Table<V> {
   void createTable(Class clazz) {
     Field[] fields = clazz.getDeclaredFields();
     for (int i = 0; i < fields.length; i++) {
+      // 获取 ele 中带有 AutoInc 注解的将被自动增长的列名
+      if (fields[i].isAnnotationPresent(AutoInc.class)) {
+        autoInc = new Tuple2<>(fields[i].getName(), 0);
+      }
       if (this.colNames.containsKey(fields[i].getName())) {
         throw new IllegalArgumentException("列名重复 : " + fields[i].getName());
       }
@@ -61,7 +59,7 @@ public class Table<V> {
       if (colVal[i] == null) break;
       if (!this.colNames.get(colNames[i].trim()).f1.equals(colVal[i].getClass().getSimpleName())) {
         throw new IllegalArgumentException(
-            "类型不对应 : " + colNames[i] + " | " + colVal[i].getClass().getSimpleName());
+                "类型不对应 : " + colNames[i] + " | " + colVal[i].getClass().getSimpleName());
       }
     }
   }
@@ -74,8 +72,19 @@ public class Table<V> {
 
   // 插入一条记录，可以缺省一些列名，同时列名不一定按建表时的顺序
   public void insert(V ele) {
-    this.colVs.add(ele);
-    this.sorted = false;
+    try {
+      if (autoInc != null) {
+        Field incFiled = ele.getClass().getDeclaredField(autoInc.f0);
+        incFiled.setAccessible(true);
+        incFiled.set(ele, ++autoInc.f1);
+      }
+      this.colVs.add(ele);
+      this.sorted = false;
+    } catch (NoSuchFieldException e) {
+      e.printStackTrace();
+    } catch (IllegalAccessException e) {
+      e.printStackTrace();
+    }
   }
 
   // 取表行数
@@ -203,7 +212,9 @@ public class Table<V> {
       for (V ele : this.colVs) {
         boolean isMatch = true;
         for (int i = 0; i < oColN.length; i++) {
-          Object oo = ele.getClass().getDeclaredField(oColN[i]).get(ele);
+          Field field = ele.getClass().getDeclaredField(colN[i]);
+          field.setAccessible(true);
+          Object oo = field.get(ele);
           // oo == null 时，不能用 equals 比较，否则会报错
           if (oo == null) {
             if (oColVs[i] != null) {
@@ -241,21 +252,21 @@ public class Table<V> {
    * @param
    */
   public void print(ArrayList<V> Vs) {
-    System.out.println("==================================== table data ==========================================");
     System.out.println(colNames);
     for (V ele : Vs) {
       System.out.println(ele);
     }
-    System.out.println("==================================== table EOF ==========================================");
   }
 
   void print() {
-    System.out.println("==================================== table data ==========================================");
+    System.out.println(
+            "==================================== table data ==========================================");
     System.out.println(this.colNames);
     for (V ele : this.colVs) {
       System.out.println(ele);
     }
-    System.out.println("==================================== table EOF ==========================================");
+    System.out.println(
+            "==================================== table EOF ==========================================");
   }
 
   // EOF

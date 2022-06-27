@@ -1,5 +1,6 @@
 package com.zzzzzzzs.sqllineage.bean;
 
+import com.zzzzzzzs.sqllineage.core.AutoInc;
 import lombok.Builder;
 import lombok.Data;
 import lombok.ToString;
@@ -14,6 +15,7 @@ import lombok.ToString;
 @Builder
 @ToString
 public class SqlInfo {
+  @AutoInc Integer id;
   String tableName;
   String tableAlias;
   String columnName;
