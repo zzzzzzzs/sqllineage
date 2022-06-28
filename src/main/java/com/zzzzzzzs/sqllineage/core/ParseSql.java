@@ -24,9 +24,6 @@ public class ParseSql {
   ObjectMapper jsonSql = new ObjectMapper();
   ArrayNode sqlNodes = jsonSql.createArrayNode();
   LinkedHashSet<ColumnInfo> lastColumnInfos = new LinkedHashSet<>(); // 记录上一次的列信息
-  //  String lastTableInfo; // 记录上一次的表名
-  // tableName, tableAlias
-  Tuple2<String, String> lastTableInfo = null; // 记录上一次的表名
 
   // 有限状态机
   public ParseSql() {
@@ -47,7 +44,6 @@ public class ParseSql {
   }
 
   public void init() {
-    lastTableInfo = new Tuple2<>();
     lastColumnInfos.clear();
     sqlNodes.removeAll();
   }
@@ -236,7 +232,7 @@ public class ParseSql {
     for (SqlNode node : withList) {
       handlerSql(node, table, uuid, flags);
     }
-    handlerSql(with.body, table, uuid, null);
+    handlerSql(with.body, table, uuid, Flag.WITH_BODY);
   }
 
   // handler with item
@@ -324,12 +320,6 @@ public class ParseSql {
    */
   private void handlerOther(SqlNode sqlNode, Table<SqlInfo> table, String uuid, Flag flags) {
     List<@Nullable SqlNode> list = ((SqlNodeList) sqlNode).getList();
-    TableInfo tableInfo = null;
-    //    if (Flag.WITH_BODY.equals(flag)) {
-    //      //      tableInfo = tableInfos.get("res");
-    //    } else {
-    //      tableInfo = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get();
-    //    }
     for (SqlNode node : list) {
       if (SqlKind.AS.equals(node.getKind())) { // 处理列别名
         handlerSql(node, table, uuid, Flag.COLUMN);
@@ -377,12 +367,9 @@ public class ParseSql {
               .level(level + 1)
               .uuid(uuid)
               .build();
-      lastTableInfo.f0 = sqlInfo.getTableName();
       table.insert(sqlInfo);
     } else if (Flag.ALIAS.equals(flag)) { // 别名
-      lastTableInfo.f1 = sqlIdentifier.getSimple();
-      table.selectWhere("uuid,tableName", uuid, lastTableInfo.f0).stream()
-          .forEach(c -> c.setTableAlias(lastTableInfo.f1));
+      findLastInfo(table, uuid).ifPresent(c -> c.setTableAlias(sqlIdentifier.getSimple()));
     } else if (Flag.COLUMN_REAL.equals(flag)) {
       findLastInfo(table, uuid)
           .map(
@@ -412,7 +399,6 @@ public class ParseSql {
               .level(level + 1)
               .uuid(uuid)
               .build();
-      //      lastTableInfo.f0 = sqlInfo.getTableName();
       table.insert(sqlInfo);
     } else if (Flag.WITH_NAME.equals(flag)) {
       findLastInfoALL(table, uuid).stream()
@@ -424,6 +410,7 @@ public class ParseSql {
                         .columnName(c.getColumnName())
                         .columnAlias(c.getColumnAlias())
                         .level(level + 1)
+                        .uuid(uuid)
                         .build();
                 return info;
               })
@@ -435,7 +422,6 @@ public class ParseSql {
               .level(level + 1)
               .uuid(uuid)
               .build();
-      lastTableInfo.f0 = sqlInfo.getTableName();
       table.insert(sqlInfo);
     }
   }
