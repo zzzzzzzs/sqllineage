@@ -10,5 +10,6 @@ public enum Flag {
   REAL, // 真实名字
   ALIAS, // 别名
   WITH_ITEM, // WITH_ITEM
+  WITH_NAME, // WITH NAME
   WITH_BODY, // WITH BODY
 }

@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.zzzzzzzs.sqllineage.bean.*;
 import com.zzzzzzzs.sqllineage.tuple.Tuple2;
-import com.zzzzzzzs.sqllineage.tuple.Tuple3;
 import lombok.SneakyThrows;
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.avatica.util.Quoting;
@@ -19,7 +18,6 @@ import org.apache.calcite.tools.Frameworks;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class ParseSql {
   FrameworkConfig config;
@@ -29,55 +27,9 @@ public class ParseSql {
   //  String lastTableInfo; // 记录上一次的表名
   // tableName, tableAlias
   Tuple2<String, String> lastTableInfo = null; // 记录上一次的表名
-  // 有限状态机
-  //  private Map<Tuple2<String, String>, HandlerSql<String, String, Table<String, String,
-  // TableInfo>>>
-  //      stateMachine = new HashMap<>();
 
   // 有限状态机
   public ParseSql() {
-    //    stateMachine.put(
-    //        Tuple2.of("INIT", "table"),
-    //        // real table, tableInfos
-    //        (var1, tableInfos) -> {
-    //          return var1.toString();
-    //        });
-    //
-    //    stateMachine.put(
-    //        Tuple2.of("table", "real"),
-    //        // real table, tableInfos
-    //        (var1, tableInfos) -> {
-    //          int level = 0;
-    //          if (tableInfos.containsRow(lastTableInfo.f0)) {
-    //            level =
-    //
-    // tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get().getLevel() + 1;
-    //          } else {
-    //            level = 1;
-    //          }
-    //          TableInfo tableInfo =
-    //              TableInfo.builder()
-    //                  .tableName(var1)
-    //                  .alias("")
-    //                  .columns(new LinkedHashSet<>())
-    //                  .level(level)
-    //                  .build();
-    //          tableInfos.put(var1, "", tableInfo);
-    //          lastTableInfo.f0 = var1;
-    //          return var1.toString();
-    //        });
-    //    stateMachine.put(
-    //        Tuple2.of("real", "as"),
-    //        // alias, tableInfos
-    //        (var1, tableInfos) -> {
-    //          TableInfo tableInfo =
-    //              tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get();
-    //          tableInfo.setAlias(var1);
-    //          lastTableInfo.f1 = var1;
-    //          tableInfos.remove(lastTableInfo.f0, lastTableInfo.f1);
-    //          tableInfos.put(lastTableInfo.f0, lastTableInfo.f1, tableInfo);
-    //          return var1.toString();
-    //        });
 
     SchemaPlus rootSchema = Frameworks.createRootSchema(true);
     config =
@@ -118,8 +70,6 @@ public class ParseSql {
     }
     SqlParser parser = SqlParser.create(sql, config.getParserConfig());
     SqlNode sqlNode = parser.parseStmt();
-    // table,alias,TableInfo
-    //    Table<SqlInfo> table = HashBasedTable.create();
 
     // 默认真实名字
     handlerSql(sqlNode, table, uuid, Flag.REAL);
@@ -292,8 +242,8 @@ public class ParseSql {
   // handler with item
   private void handleWithItem(SqlNode sqlNode, Table<SqlInfo> table, String uuid, Flag flags) {
     SqlWithItem withItem = (SqlWithItem) sqlNode;
-    handlerSql(withItem.query, table, uuid, flags);
-    handlerSql(withItem.name, table, uuid, null);
+    handlerSql(withItem.query, table, uuid, Flag.WITH_ITEM);
+    handlerSql(withItem.name, table, uuid, Flag.WITH_NAME);
   }
 
   // handle order by
@@ -380,36 +330,29 @@ public class ParseSql {
     //    } else {
     //      tableInfo = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get();
     //    }
-    //    lastColumnInfos.clear();
     for (SqlNode node : list) {
       if (SqlKind.AS.equals(node.getKind())) { // 处理列别名
         handlerSql(node, table, uuid, Flag.COLUMN);
       } else {
-        List<SqlInfo> sqlInfos =
-            table.selectWhere(
-                "uuid,tableName,tableAlias", uuid, lastTableInfo.f0, lastTableInfo.f1);
-        int level = sqlInfos.stream().mapToInt(SqlInfo::getLevel).max().getAsInt();
-        // columnName 为 null 的
-        List<SqlInfo> sqlInfos1 =
-            sqlInfos.stream()
-                .filter(c -> c.getColumnName() == null)
-                .map(
-                    c -> {
-                      c.setColumnName(node.toString());
-                      return c;
-                    })
-                .collect(Collectors.toList());
-        if (sqlInfos1.isEmpty()) {
-          SqlInfo sqlInfo =
-              SqlInfo.builder()
-                  .uuid(uuid)
-                  .tableName(lastTableInfo.f0)
-                  .tableAlias(lastTableInfo.f1)
-                  .columnName(node.toString())
-                  .level(level)
-                  .build();
-          table.insert(sqlInfo);
-        }
+        findLastInfo(table, uuid)
+            .map(
+                info -> {
+                  if (info.getColumnName() == null) {
+                    info.setColumnName(node.toString());
+                    return null;
+                  } else {
+                    SqlInfo sqlInfo =
+                        SqlInfo.builder()
+                            .uuid(uuid)
+                            .tableName(info.getTableName())
+                            .tableAlias(info.getTableAlias())
+                            .columnName(node.toString())
+                            .level(info.getLevel())
+                            .build();
+                    return sqlInfo;
+                  }
+                })
+            .ifPresent(table::insert);
       }
     }
   }
@@ -441,12 +384,7 @@ public class ParseSql {
       table.selectWhere("uuid,tableName", uuid, lastTableInfo.f0).stream()
           .forEach(c -> c.setTableAlias(lastTableInfo.f1));
     } else if (Flag.COLUMN_REAL.equals(flag)) {
-      Optional<SqlInfo> sqlInfoOpt =
-          table
-              .selectWhere("uuid,tableName,tableAlias", uuid, lastTableInfo.f0, lastTableInfo.f1)
-              .stream()
-              .findFirst();
-      sqlInfoOpt
+      findLastInfo(table, uuid)
           .map(
               c -> {
                 if (c.getColumnName() == null) {
@@ -456,8 +394,8 @@ public class ParseSql {
                   SqlInfo sqlInfo =
                       SqlInfo.builder()
                           .uuid(uuid)
-                          .tableName(lastTableInfo.f0)
-                          .tableAlias(lastTableInfo.f1)
+                          .tableName(c.getTableName())
+                          .tableAlias(c.getTableAlias())
                           .columnName(sqlIdentifier.getSimple())
                           .level(level)
                           .build();
@@ -466,51 +404,55 @@ public class ParseSql {
               })
           .ifPresent(table::insert);
     } else if (Flag.COLUMN_ALIAS.equals(flag)) {
-      table.selectWhere("uuid", uuid).stream()
-          .max(Comparator.comparing(SqlInfo::getId))
-          .ifPresent(c -> c.setColumnAlias(sqlIdentifier.getSimple()));
+      findLastInfo(table, uuid).ifPresent(c -> c.setColumnAlias(sqlIdentifier.getSimple()));
+    } else if (Flag.WITH_ITEM.equals(flag)) {
+      SqlInfo sqlInfo =
+          SqlInfo.builder()
+              .tableName(sqlIdentifier.getSimple())
+              .level(level + 1)
+              .uuid(uuid)
+              .build();
+      //      lastTableInfo.f0 = sqlInfo.getTableName();
+      table.insert(sqlInfo);
+    } else if (Flag.WITH_NAME.equals(flag)) {
+      findLastInfoALL(table, uuid).stream()
+          .map(
+              c -> {
+                SqlInfo info =
+                    SqlInfo.builder()
+                        .tableName(sqlIdentifier.getSimple())
+                        .columnName(c.getColumnName())
+                        .columnAlias(c.getColumnAlias())
+                        .level(level + 1)
+                        .build();
+                return info;
+              })
+          .forEach(table::insert);
+    } else if (Flag.WITH_BODY.equals(flag)) {
+      SqlInfo sqlInfo =
+          SqlInfo.builder()
+              .tableName(sqlIdentifier.getSimple())
+              .level(level + 1)
+              .uuid(uuid)
+              .build();
+      lastTableInfo.f0 = sqlInfo.getTableName();
+      table.insert(sqlInfo);
     }
+  }
 
-    //    String nextState = stateMachine.get(Tuple2.of(flags., event.eventType)).get();
-    //    if (Flag.REAL.equals(flag)) {
-    //      // 第一次遇到真实表命名
-    //      if (tableInfos.isEmpty() || tableInfos.row(sqlIdentifier.getSimple()).size() == 0) {
-    //        tableInfo =
-    //            TableInfo.builder()
-    //                .tableName(sqlIdentifier.getSimple())
-    //                .alias(new String())
-    //                .columns(new LinkedHashSet<>())
-    //                .level(level)
-    //                .build();
-    //        tableInfos.put(sqlIdentifier.getSimple(), "", tableInfo);
-    //      }
-    //      lastTableInfo.f0 = sqlIdentifier.getSimple();
-    //    } else if (Flag.ALIAS.equals(flag)) {
-    //      tableInfo = tableInfos.row(lastTableInfo.f0).values().stream().findFirst().get();
-    //      tableInfo.setAlias(sqlIdentifier.getSimple());
-    //      lastTableInfo.f1 = sqlIdentifier.getSimple();
-    //      tableInfos.remove(lastTableInfo.f0, lastTableInfo.f1);
-    //      tableInfos.put(lastTableInfo.f0, lastTableInfo.f1, tableInfo);
-    //    } else if (Flag.WITH_ITEM.equals(flag)) {
-    //      tableInfo =
-    //          TableInfo.builder()
-    //              .tableName(sqlIdentifier.getSimple())
-    //              .alias(new String())
-    //              .columns(new LinkedHashSet<>(lastColumnInfos))
-    //              .level(level)
-    //              .build();
-    //      //      tableInfos.put(sqlIdentifier.getSimple(), tableInfo);
-    //    } else if (Flag.WITH_BODY.equals(flag)) {
-    //      //      tableInfo =
-    //      //          TableInfo.builder()
-    //      //              .tableName("res")
-    //      //              .alias(new String())
-    //      //              .columns(new LinkedHashSet<>())
-    //      //              .level(level)
-    //      //              .build();
-    //      //      tableInfos.put("res", tableInfo);
-    //    }
-    //        lastTableName = sqlIdentifier.getSimple();
+  // 查找上一条数据
+  private Optional<SqlInfo> findLastInfo(Table<SqlInfo> table, String uuid) {
+    return table.selectWhere("uuid", uuid).stream().max(Comparator.comparing(SqlInfo::getId));
+  }
+
+  // 查找上一个表的所有记录
+  private List<SqlInfo> findLastInfoALL(Table<SqlInfo> table, String uuid) {
+    Optional<SqlInfo> lastInfoOpt = findLastInfo(table, uuid);
+    return table.selectWhere(
+        "uuid,tableName,tableAlias",
+        uuid,
+        lastInfoOpt.get().getTableName(),
+        lastInfoOpt.get().getTableAlias());
   }
 
   public static void main(String[] args) {
