@@ -90,6 +90,7 @@ public class ParseSql {
                   .replace("$columns", colArr.toString())
                   .replace("$top", lastTop + "")
                   .replace("$left", lastLeft + "");
+          lastLeft += 150;
           if (info.getLevel() == 2) {
             node = node.replace("$type", "Origin");
           } else {
@@ -107,7 +108,9 @@ public class ParseSql {
           SqlJson.nodeStr
               .replace("$tableName", tableName)
               .replace("$type", "RS")
-              .replace("$columns", colArr.toString());
+              .replace("$columns", colArr.toString())
+              .replace("$top", lastTop + "")
+              .replace("$left", lastLeft + "");
       tableArr.add(jsonSql.readTree(node));
       // edge
       ArrayNode sqlEdges = jsonSql.createArrayNode();
