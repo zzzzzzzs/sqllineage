@@ -4,7 +4,6 @@ import com.zzzzzzzs.sqllineage.tuple.Tuple2;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 
@@ -97,7 +96,7 @@ public class Table<V> {
   }
 
   // 查找记录
-  public ArrayList<V> selectWhere(String colName, Object... colVal) {
+  public List<V> selectWhere(String colName, Object... colVal) {
     if (sorted) {
       return selectWhere2();
     } else {
@@ -105,7 +104,7 @@ public class Table<V> {
     }
   }
   // 遍历查找 V 中的记录
-  private ArrayList<V> selectWhere1(String colName, Object... colVal) {
+  private List<V> selectWhere1(String colName, Object... colVal) {
     checkCol(colName, colVal);
     String[] colN = colName.split(",");
     ArrayList<V> res = new ArrayList<>();
@@ -142,8 +141,13 @@ public class Table<V> {
   }
 
   // 二分查找记录，可返回多行
-  private ArrayList<V> selectWhere2() {
+  private List<V> selectWhere2() {
     return null;
+  }
+
+  // 查询所有数据
+  public List<V> selectAll() {
+    return this.colVs;
   }
 
   // 删除记录

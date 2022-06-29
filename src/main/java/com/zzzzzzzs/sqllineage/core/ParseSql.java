@@ -3,8 +3,9 @@ package com.zzzzzzzs.sqllineage.core;
 import cn.hutool.core.io.file.FileReader;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.zzzzzzzs.sqllineage.bean.*;
-import com.zzzzzzzs.sqllineage.tuple.Tuple2;
+import com.zzzzzzzs.sqllineage.bean.Flag;
+import com.zzzzzzzs.sqllineage.bean.SqlInfo;
+import com.zzzzzzzs.sqllineage.bean.SqlJson;
 import lombok.SneakyThrows;
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.avatica.util.Quoting;
@@ -15,6 +16,7 @@ import org.apache.calcite.sql.parser.impl.SqlParserImpl;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
+import org.apache.commons.lang3.StringUtils;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.*;
@@ -22,12 +24,9 @@ import java.util.*;
 public class ParseSql {
   FrameworkConfig config;
   ObjectMapper jsonSql = new ObjectMapper();
-  ArrayNode sqlNodes = jsonSql.createArrayNode();
-  LinkedHashSet<ColumnInfo> lastColumnInfos = new LinkedHashSet<>(); // 记录上一次的列信息
 
   // 有限状态机
   public ParseSql() {
-
     SchemaPlus rootSchema = Frameworks.createRootSchema(true);
     config =
         Frameworks.newConfigBuilder()
@@ -43,19 +42,12 @@ public class ParseSql {
             .build();
   }
 
-  public void init() {
-    lastColumnInfos.clear();
-    sqlNodes.removeAll();
-  }
-
   // parse select
   @SneakyThrows
   public String parseSelect(String sql) {
     String uuid = UUID.randomUUID().toString();
     Table<SqlInfo> table = new Table();
     table.createTable(SqlInfo.class);
-    // TODO: 高并发下有问题
-    init();
     if (sql == null || sql.isEmpty()) {
       FileReader fileReader = new FileReader("sql/aquery009.sql");
       sql = fileReader.readString();
@@ -69,120 +61,83 @@ public class ParseSql {
 
     // 默认真实名字
     handlerSql(sqlNode, table, uuid, Flag.REAL);
-    //    String ret = map2Json(tableInfos);
-
+    table.print();
     //    System.out.println("tableInfos" + jsonSql.writeValueAsString(tableInfos));
     // System.out.println(jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfos));
     //    return jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfos);
     //    return tableInfos.toString();
     //    return ret;
-    table.print();
-    return table.toString();
+    String ret = table2Json(table, uuid);
+    return ret;
   }
 
-  //  private String map2Json(Table<SqlInfo> table) {
-  //    String ret = null;
-  //    try {
-  //      int lastLevel = 1;
-  //      int lastTop = -100;
-  //      int lastLeft = 0;
-  //
-  //      for (Map.Entry<String, TableInfo> entry : tableInfos.entrySet()) {
-  //        String key = entry.getKey();
-  //        TableInfo value = entry.getValue();
-  //
-  //        String node =
-  //            SqlJson.nodeStr
-  //                .replace("$tableName", value.getTableName())
-  //                .replace(
-  //                    "$columns",
-  //                    // jsonSql.writeValueAsString(value.getColumns()));
-  //                    jsonSql.writeValueAsString(
-  //                        value.getColumns().stream()
-  //                            .map(
-  //                                ele -> {
-  //                                  try {
-  //                                    return jsonSql.readTree(
-  //                                        SqlJson.columnStr.replace(
-  //                                            "$name",
-  //                                            ele.getAlias() == null
-  //                                                ? ele.getName()
-  //                                                : (ele.getName() + "|" + ele.getAlias())));
-  //                                  } catch (JsonProcessingException e) {
-  //                                    e.printStackTrace();
-  //                                  }
-  //                                  return null;
-  //                                })
-  //                            .toArray()));
-  //
-  //        if (1 == value.getLevel()) {
-  //          node = node.replace("$type", "Origin");
-  //        } else if ("res" == value.getTableName()) {
-  //          node = node.replace("$type", "RS");
-  //        } else {
-  //          node = node.replace("$type", "Middle");
-  //        }
-  //        if (lastLevel == value.getLevel()) {
-  //          lastTop += 200;
-  //        } else {
-  //          lastLevel = value.getLevel();
-  //          lastTop = 100;
-  //          lastLeft += 150;
-  //        }
-  //        node =
-  //            node.replace("$top", String.valueOf(lastTop))
-  //                .replace("$left", String.valueOf(lastLeft));
-  //        sqlNodes.add(jsonSql.readTree(node));
-  //      }
-  //      // edge
-  //      ArrayNode sqlEdges = jsonSql.createArrayNode();
-  //      lastLevel = 2;
-  //      // column, table
-  //      // 上一次
-  //      Multimap<String, String> lastColTable = ArrayListMultimap.create();
-  //      // 本次
-  //      Multimap<String, String> colTable = ArrayListMultimap.create();
-  //      for (Map.Entry<String, TableInfo> entry : tableInfos.entrySet()) {
-  //        String key = entry.getKey();
-  //        TableInfo value = entry.getValue();
-  //
-  //        if (1 == value.getLevel()) {
-  //          value.getColumns().forEach(el -> lastColTable.put(el.getName(),
-  // value.getTableName()));
-  //          continue;
-  //        }
-  //        if ((lastLevel == value.getLevel())) {
-  //          value.getColumns().forEach(el -> colTable.put(el.getName(), value.getTableName()));
-  //        } else {
-  //          lastColTable.clear();
-  //          lastColTable.putAll(colTable);
-  //          colTable.clear();
-  //          value.getColumns().forEach(el -> colTable.put(el.getName(), value.getTableName()));
-  //          lastLevel++;
-  //        }
-  //        for (ColumnInfo el : value.getColumns()) {
-  //          if (lastColTable.containsKey(el.getName())) {
-  //            for (String s : lastColTable.get(el.getName())) {
-  //              System.out.println(s + " " + el.getName() + " " + value.getTableName());
-  //              sqlEdges.add(
-  //                  jsonSql.readTree(
-  //                      SqlJson.edgeStr
-  //                          .replace("$1", el.getName())
-  //                          .replace("$2", s)
-  //                          .replace("$3", el.getName())
-  //                          .replace("$4", value.getTableName())));
-  //            }
-  //          }
-  //        }
-  //      }
-  //      ret =
-  //          SqlJson.res.replace("$edges", sqlEdges.toString()).replace("$nodes",
-  // sqlNodes.toString());
-  //    } catch (JsonProcessingException e) {
-  //      e.printStackTrace();
-  //    }
-  //    return ret;
-  //  }
+  private String table2Json(Table<SqlInfo> table, String uuid) {
+    String ret = null;
+    try {
+      int lastTop = -100;
+      int lastLeft = 0;
+      List<SqlInfo> infos = table.selectWhere("uuid", uuid);
+      ArrayNode colArr = jsonSql.createArrayNode();
+      ArrayNode tableArr = jsonSql.createArrayNode();
+      String tableName = infos.get(0).getTableName();
+      String tableAlias = infos.get(0).getTableAlias();
+      for (SqlInfo info : infos) {
+        if (!StringUtils.equals(tableName, info.getTableName())
+            || !StringUtils.equals(tableAlias, info.getTableAlias())) {
+          String node =
+              SqlJson.nodeStr
+                  .replace("$tableName", tableName)
+                  .replace("$columns", colArr.toString())
+                  .replace("$top", lastTop + "")
+                  .replace("$left", lastLeft + "");
+          if (info.getLevel() == 2) {
+            node = node.replace("$type", "Origin");
+          } else {
+            node = node.replace("$type", "Middle");
+          }
+          tableArr.add(jsonSql.readTree(node));
+          tableName = info.getTableName();
+          tableAlias = info.getTableAlias();
+          colArr.removeAll();
+        }
+        String col = SqlJson.columnStr.replace("$name", info.getColumnName());
+        colArr.add(jsonSql.readTree(col));
+      }
+      String node =
+          SqlJson.nodeStr
+              .replace("$tableName", tableName)
+              .replace("$type", "RS")
+              .replace("$columns", colArr.toString());
+      tableArr.add(jsonSql.readTree(node));
+      // edge
+      ArrayNode sqlEdges = jsonSql.createArrayNode();
+      for (SqlInfo info : infos) {
+        List<SqlInfo> sqlInfos =
+            table.selectWhere(
+                "uuid,columnName,columnAlias,level",
+                info.getUuid(),
+                info.getColumnName(),
+                info.getColumnAlias(),
+                info.getLevel() + 1);
+        if (sqlInfos.size() == 1) {
+          String edge =
+              SqlJson.edgeStr
+                  .replace("$1", info.getColumnName())
+                  .replace("$2", info.getTableName())
+                  .replace("$3", sqlInfos.get(0).getColumnName())
+                  .replace("$4", sqlInfos.get(0).getTableName());
+          sqlEdges.add(jsonSql.readTree(edge));
+        }
+      }
+
+      ret =
+          SqlJson.res.replace("$edges", sqlEdges.toString()).replace("$nodes", tableArr.toString());
+
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+    return ret;
+  }
 
   // handle sqlnode
   private void handlerSql(SqlNode sqlNode, Table<SqlInfo> table, String uuid, Flag flags) {
