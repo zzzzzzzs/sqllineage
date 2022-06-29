@@ -115,13 +115,18 @@ public class ParseSql {
       // edge
       ArrayNode sqlEdges = jsonSql.createArrayNode();
       for (SqlInfo info : infos) {
+        // 列名找下一个节点的信息
         List<SqlInfo> sqlInfos =
             table.selectWhere(
-                "uuid,columnName,columnAlias,level",
+                "uuid,columnName,level", info.getUuid(), info.getColumnName(), info.getLevel() + 1);
+        // 列别名找下一个节点的信息
+        List<SqlInfo> sqlInfos1 =
+            table.selectWhere(
+                "uuid,columnName,level",
                 info.getUuid(),
-                info.getColumnName(),
                 info.getColumnAlias(),
                 info.getLevel() + 1);
+        sqlInfos = sqlInfos.size() == 1 ? sqlInfos : sqlInfos1;
         if (sqlInfos.size() == 1) {
           String edge =
               SqlJson.edgeStr
