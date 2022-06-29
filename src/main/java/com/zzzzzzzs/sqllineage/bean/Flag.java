@@ -9,6 +9,8 @@ public enum Flag {
   COLUMN, // 列
   REAL, // 真实名字
   ALIAS, // 别名
+  LEFT_JOIN, // 左表join
+  RIGHT_JOIN, // 右表join
   WITH_ITEM, // WITH_ITEM
   WITH_NAME, // WITH NAME
   WITH_BODY, // WITH BODY

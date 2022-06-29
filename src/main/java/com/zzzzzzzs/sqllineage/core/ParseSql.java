@@ -79,34 +79,41 @@ public class ParseSql {
       List<SqlInfo> infos = table.selectWhere("uuid", uuid);
       ArrayNode colArr = jsonSql.createArrayNode();
       ArrayNode tableArr = jsonSql.createArrayNode();
-      String tableName = infos.get(0).getTableName();
-      String tableAlias = infos.get(0).getTableAlias();
+      String lastTableName = infos.get(0).getTableName();
+      String lastTableAlias = infos.get(0).getTableAlias();
+      Integer lastLevel = infos.get(0).getLevel();
       for (SqlInfo info : infos) {
-        if (!StringUtils.equals(tableName, info.getTableName())
-            || !StringUtils.equals(tableAlias, info.getTableAlias())) {
+        if (!StringUtils.equals(lastTableName, info.getTableName())
+            || !StringUtils.equals(lastTableAlias, info.getTableAlias())) {
           String node =
               SqlJson.nodeStr
-                  .replace("$tableName", tableName)
+                  .replace("$tableName", lastTableName)
                   .replace("$columns", colArr.toString())
                   .replace("$top", lastTop + "")
                   .replace("$left", lastLeft + "");
-          lastLeft += 150;
+          if (lastLevel == info.getLevel()) {
+            lastTop = 100;
+          } else {
+            lastLeft += 150;
+          }
           if (info.getLevel() == 2) {
             node = node.replace("$type", "Origin");
           } else {
             node = node.replace("$type", "Middle");
           }
           tableArr.add(jsonSql.readTree(node));
-          tableName = info.getTableName();
-          tableAlias = info.getTableAlias();
+          lastTableName = info.getTableName();
+          lastTableAlias = info.getTableAlias();
           colArr.removeAll();
         }
-        String col = SqlJson.columnStr.replace("$name", info.getColumnName());
+        String col =
+            SqlJson.columnStr.replace(
+                "$name", info.getColumnName() == null ? "" : info.getColumnName());
         colArr.add(jsonSql.readTree(col));
       }
       String node =
           SqlJson.nodeStr
-              .replace("$tableName", tableName)
+              .replace("$tableName", lastTableName)
               .replace("$type", "RS")
               .replace("$columns", colArr.toString())
               .replace("$top", lastTop + "")
@@ -218,8 +225,8 @@ public class ParseSql {
     SqlJoin join = (SqlJoin) sqlNode;
     SqlNode left = join.getLeft();
     SqlNode right = join.getRight();
-    handlerSql(left, table, uuid, flags);
-    handlerSql(right, table, uuid, flags);
+    handlerSql(left, table, uuid, Flag.LEFT_JOIN);
+    handlerSql(right, table, uuid, Flag.RIGHT_JOIN);
   }
 
   // handle select
@@ -385,6 +392,18 @@ public class ParseSql {
               .level(level + 1)
               .uuid(uuid)
               .build();
+      table.insert(sqlInfo);
+    } else if (Flag.LEFT_JOIN.equals(flag)) {
+      SqlInfo sqlInfo =
+          SqlInfo.builder()
+              .tableName(sqlIdentifier.getSimple())
+              .level(level + 1)
+              .uuid(uuid)
+              .build();
+      table.insert(sqlInfo);
+    } else if (Flag.RIGHT_JOIN.equals(flag)) {
+      SqlInfo sqlInfo =
+          SqlInfo.builder().tableName(sqlIdentifier.getSimple()).level(level).uuid(uuid).build();
       table.insert(sqlInfo);
     }
   }
