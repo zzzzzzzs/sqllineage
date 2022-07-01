@@ -58,7 +58,7 @@ public class Table<V> {
       if (colVal[i] == null) break;
       if (!this.colNames.get(colNames[i].trim()).f1.equals(colVal[i].getClass().getSimpleName())) {
         throw new IllegalArgumentException(
-                "类型不对应 : " + colNames[i] + " | " + colVal[i].getClass().getSimpleName());
+            "类型不对应 : " + colNames[i] + " | " + colVal[i].getClass().getSimpleName());
       }
     }
   }
@@ -196,7 +196,7 @@ public class Table<V> {
 
   private void deletewhere2() {}
 
-  // 更新记录
+  // 更新记录，目前要保证字段数量相同才可以更新
   public void updateWhere(String oColName, Object[] oColVs, String colName, Object[] colVs) {
     if (sorted) {
       updateWhere2();
@@ -216,7 +216,7 @@ public class Table<V> {
       for (V ele : this.colVs) {
         boolean isMatch = true;
         for (int i = 0; i < oColN.length; i++) {
-          Field field = ele.getClass().getDeclaredField(colN[i]);
+          Field field = ele.getClass().getDeclaredField(colN[i].trim());
           field.setAccessible(true);
           Object oo = field.get(ele);
           // oo == null 时，不能用 equals 比较，否则会报错
@@ -234,7 +234,9 @@ public class Table<V> {
         }
         if (isMatch) {
           for (int i = 0; i < colN.length; i++) {
-            ele.getClass().getDeclaredField(colN[i]).set(ele, colVs[i]);
+            Field field = ele.getClass().getDeclaredField(colN[i].trim());
+            field.setAccessible(true);
+            field.set(ele, colVs[i]);
           }
         }
       }
@@ -264,13 +266,13 @@ public class Table<V> {
 
   void print() {
     System.out.println(
-            "==================================== table data ==========================================");
+        "==================================== table data ==========================================");
     System.out.println(this.colNames);
     for (V ele : this.colVs) {
       System.out.println(ele);
     }
     System.out.println(
-            "==================================== table EOF ==========================================");
+        "==================================== table EOF ==========================================");
   }
 
   // EOF

@@ -4,6 +4,7 @@ import com.zzzzzzzs.sqllineage.core.AutoInc;
 import lombok.Builder;
 import lombok.Data;
 import lombok.ToString;
+import lombok.experimental.Accessors;
 
 /**
  * Sql Info
@@ -13,6 +14,7 @@ import lombok.ToString;
  */
 @Data
 @Builder
+@Accessors(chain = true)
 @ToString
 public class SqlInfo {
   @AutoInc Integer id;
@@ -21,6 +23,10 @@ public class SqlInfo {
   String columnName;
   String columnAlias;
   Integer level;
+
+  // 用来标记 with 语句中的列名
+  Boolean withFlag;
+
   // 唯一标识符
   String uuid;
 }

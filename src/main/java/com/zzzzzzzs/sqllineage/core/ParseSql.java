@@ -60,13 +60,8 @@ public class ParseSql {
     SqlNode sqlNode = parser.parseStmt();
 
     // 默认真实名字
-    handlerSql(sqlNode, table, uuid, Flag.REAL);
+    handlerSql(sqlNode, table, null, uuid, Flag.REAL);
     table.print();
-    //    System.out.println("tableInfos" + jsonSql.writeValueAsString(tableInfos));
-    // System.out.println(jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfos));
-    //    return jsonSql.writerWithDefaultPrettyPrinter().writeValueAsString(tableInfos);
-    //    return tableInfos.toString();
-    //    return ret;
     String ret = table2Json(table, uuid);
     return ret;
   }
@@ -82,6 +77,7 @@ public class ParseSql {
       String lastTableName = infos.get(0).getTableName();
       String lastTableAlias = infos.get(0).getTableAlias();
       Integer lastLevel = infos.get(0).getLevel();
+      // table
       for (SqlInfo info : infos) {
         if (!StringUtils.equals(lastTableName, info.getTableName())
             || !StringUtils.equals(lastTableAlias, info.getTableAlias())) {
@@ -120,6 +116,7 @@ public class ParseSql {
               .replace("$left", lastLeft + "");
       tableArr.add(jsonSql.readTree(node));
       // edge
+      // TODO 后期可以放在 table
       ArrayNode sqlEdges = jsonSql.createArrayNode();
       for (SqlInfo info : infos) {
         // 列名找下一个节点的信息
@@ -155,7 +152,8 @@ public class ParseSql {
   }
 
   // handle sqlnode
-  private void handlerSql(SqlNode sqlNode, Table<SqlInfo> table, String uuid, Flag flags) {
+  private void handlerSql(
+      SqlNode sqlNode, Table<SqlInfo> table, String tableName, String uuid, Flag flag) {
     if (sqlNode == null) return;
     SqlKind kind = sqlNode.getKind();
     switch (kind) {
@@ -163,32 +161,32 @@ public class ParseSql {
         handlerInsert(sqlNode);
         break;
       case SELECT:
-        handlerSelect(sqlNode, table, uuid, flags);
+        handlerSelect(sqlNode, table, uuid, flag);
         break;
       case JOIN:
-        handlerJoin(sqlNode, table, uuid, flags);
+        handlerJoin(sqlNode, table, uuid, flag);
         break;
       case AS:
-        handlerAs(sqlNode, table, uuid, flags);
+        handlerAs(sqlNode, table, uuid, flag);
         break;
       case UNION:
         break;
       case ORDER_BY:
-        handlerOrderBy(sqlNode, table, uuid, flags);
+        handlerOrderBy(sqlNode, table, uuid, flag);
         break;
       case WITH:
-        handleWith(sqlNode, table, uuid, flags);
+        handleWith(sqlNode, table, uuid, flag);
         break;
       case WITH_ITEM:
-        handleWithItem(sqlNode, table, uuid, flags);
+        handleWithItem(sqlNode, table, uuid, flag);
         break;
       case IDENTIFIER:
         // 表名
-        handlerIdentifier(sqlNode, table, uuid, flags);
+        handlerIdentifier(sqlNode, table, tableName, uuid, flag);
         break;
       case OTHER:
         // 列名
-        handlerOther(sqlNode, table, uuid, flags);
+        handlerOther(sqlNode, table, tableName, uuid, flag);
         break;
       default:
         break;
@@ -200,16 +198,18 @@ public class ParseSql {
     SqlWith with = (SqlWith) sqlNode;
     List<@Nullable SqlNode> withList = with.withList.getList();
     for (SqlNode node : withList) {
-      handlerSql(node, table, uuid, flags);
+      handlerSql(node, table, null, uuid, flags);
     }
-    handlerSql(with.body, table, uuid, Flag.WITH_BODY);
+    handlerSql(with.body, table, null, uuid, Flag.WITH_BODY);
   }
 
   // handler with item
   private void handleWithItem(SqlNode sqlNode, Table<SqlInfo> table, String uuid, Flag flags) {
     SqlWithItem withItem = (SqlWithItem) sqlNode;
-    handlerSql(withItem.query, table, uuid, Flag.WITH_ITEM);
-    handlerSql(withItem.name, table, uuid, Flag.WITH_NAME);
+    handlerSql(withItem.query, table, null, uuid, Flag.WITH_ITEM);
+    // 处理 with 字段 （with tmp as (select * from consumer)）
+    handlerSql(withItem.name, table, null, uuid, Flag.WITH_NAME);
+    updateWithFlag(table, uuid);
   }
 
   // handle order by
@@ -217,7 +217,7 @@ public class ParseSql {
   private void handlerOrderBy(SqlNode sqlNode, Table<SqlInfo> table, String uuid, Flag flags) {
     SqlOrderBy orderBy = (SqlOrderBy) sqlNode;
     SqlNode query = orderBy.query;
-    handlerSql(query, table, uuid, flags);
+    handlerSql(query, table, null, uuid, flags);
   }
 
   // handle join
@@ -225,40 +225,35 @@ public class ParseSql {
     SqlJoin join = (SqlJoin) sqlNode;
     SqlNode left = join.getLeft();
     SqlNode right = join.getRight();
-    handlerSql(left, table, uuid, Flag.LEFT_JOIN);
-    handlerSql(right, table, uuid, Flag.RIGHT_JOIN);
+    handlerSql(left, table, null, uuid, Flag.LEFT_JOIN);
+    handlerSql(right, table, null, uuid, Flag.RIGHT_JOIN);
   }
 
   // handle select
   private void handlerSelect(SqlNode sqlNode, Table<SqlInfo> table, String uuid, Flag flags) {
     SqlSelect select = (SqlSelect) sqlNode;
     SqlNode from = select.getFrom();
-    handlerSql(from, table, uuid, flags);
+    handlerSql(from, table, null, uuid, flags);
     SqlNode where = select.getWhere();
-    handlerSql(where, table, uuid, null);
-    //    try {
-    //      from.getClass().getField("names");
-    //    } catch (NoSuchFieldException e) {
-    //      System.out.println("no names");
-    //    }
+    handlerSql(where, table, null, uuid, null);
     SqlNode selectList = select.getSelectList();
-    handlerSql(selectList, table, uuid, flags);
+    handlerSql(selectList, table, from.toString(), uuid, flags);
     // TODO 后期处理
     //    SqlNode groupBy = select.getGroup();
     //    handlerSql(groupBy, null, null);
     SqlNode having = select.getHaving();
-    handlerSql(having, table, uuid, null);
+    handlerSql(having, table, null, uuid, null);
     SqlNodeList orderList = select.getOrderList();
-    handlerSql(orderList, table, uuid, null);
+    handlerSql(orderList, table, null, uuid, null);
   }
 
   // handle insert
   private void handlerInsert(SqlNode sqlNode) {
     SqlInsert sqlInsert = (SqlInsert) sqlNode;
     SqlNode insertList = sqlInsert.getTargetTable();
-    handlerSql(insertList, null, null, null);
+    handlerSql(insertList, null, null, null, null);
     SqlNode source = sqlInsert.getSource();
-    handlerSql(source, null, null, null);
+    handlerSql(source, null, null, null, null);
   }
 
   private void handlerAs(SqlNode sqlNode, Table<SqlInfo> table, String uuid, Flag flags) {
@@ -269,15 +264,15 @@ public class ParseSql {
     SqlNode right = operandList.get(1);
 
     if (Flag.COLUMN.equals(flags)) { // 列名 & REAL
-      handlerSql(left, table, uuid, Flag.COLUMN_REAL);
-      handlerSql(right, table, uuid, Flag.COLUMN_ALIAS);
+      handlerSql(left, table, null, uuid, Flag.COLUMN_REAL);
+      handlerSql(right, table, null, uuid, Flag.COLUMN_ALIAS);
     } else {
-      handlerSql(left, table, uuid, Flag.REAL);
+      handlerSql(left, table, null, uuid, Flag.REAL);
       // 左是名字，那么右就是别名，否则就是子函数
       if (SqlKind.IDENTIFIER.equals(left.getKind())) {
-        handlerSql(right, table, uuid, Flag.ALIAS);
+        handlerSql(right, table, null, uuid, Flag.ALIAS);
       } else {
-        handlerSql(right, table, uuid, Flag.REAL);
+        handlerSql(right, table, null, uuid, Flag.REAL);
       }
     }
   }
@@ -288,11 +283,33 @@ public class ParseSql {
    * @param sqlNode
    * @param table
    */
-  private void handlerOther(SqlNode sqlNode, Table<SqlInfo> table, String uuid, Flag flags) {
+  private void handlerOther(
+      SqlNode sqlNode, Table<SqlInfo> table, String tableName, String uuid, Flag flag) {
     List<@Nullable SqlNode> list = ((SqlNodeList) sqlNode).getList();
     for (SqlNode node : list) {
       if (SqlKind.AS.equals(node.getKind())) { // 处理列别名
-        handlerSql(node, table, uuid, Flag.COLUMN);
+        handlerSql(node, table, null, uuid, Flag.COLUMN);
+      } else if (Flag.WITH_ITEM.equals(flag)) { // 处理 with item
+        List<SqlInfo> sqlInfos =
+            table.selectWhere("uuid,tableName,columnName", uuid, tableName, node.toString());
+        sqlInfos.stream().forEach(info -> info.setWithFlag(true));
+        if (sqlInfos.size() == 0) {
+          List<SqlInfo> infos =
+              table.selectWhere("uuid,tableName,columnName", uuid, tableName, null);
+          infos.stream().forEach(info -> info.setColumnName(node.toString()).setWithFlag(true));
+
+          if (infos.size() == 0) {
+            SqlInfo info =
+                SqlInfo.builder()
+                    .tableName(tableName)
+                    .columnName(node.toString())
+                    .level(1)
+                    .withFlag(true)
+                    .uuid(uuid)
+                    .build();
+            table.insert(info);
+          }
+        }
       } else {
         findLastInfo(table, uuid)
             .map(
@@ -324,7 +341,8 @@ public class ParseSql {
    * @param table
    * @param flag 名字标识符
    */
-  private void handlerIdentifier(SqlNode sqlNode, Table<SqlInfo> table, String uuid, Flag flag) {
+  private void handlerIdentifier(
+      SqlNode sqlNode, Table<SqlInfo> table, String tableName, String uuid, Flag flag) {
     SqlIdentifier sqlIdentifier = (SqlIdentifier) sqlNode;
     // table 获取最大 level
     int level =
@@ -363,15 +381,18 @@ public class ParseSql {
     } else if (Flag.COLUMN_ALIAS.equals(flag)) {
       findLastInfo(table, uuid).ifPresent(c -> c.setColumnAlias(sqlIdentifier.getSimple()));
     } else if (Flag.WITH_ITEM.equals(flag)) {
-      SqlInfo sqlInfo =
-          SqlInfo.builder()
-              .tableName(sqlIdentifier.getSimple())
-              .level(level + 1)
-              .uuid(uuid)
-              .build();
-      table.insert(sqlInfo);
+      List<SqlInfo> sqlInfos = table.selectWhere("uuid,tableName", uuid, sqlIdentifier.getSimple());
+      if (sqlInfos.size() == 0) {
+        SqlInfo sqlInfo =
+            SqlInfo.builder()
+                .tableName(sqlIdentifier.getSimple())
+                .level(level + 1)
+                .uuid(uuid)
+                .build();
+        table.insert(sqlInfo);
+      }
     } else if (Flag.WITH_NAME.equals(flag)) {
-      findLastInfoALL(table, uuid).stream()
+      findLastInfoWithALL(table, uuid).stream()
           .map(
               c -> {
                 SqlInfo info =
@@ -388,7 +409,7 @@ public class ParseSql {
     } else if (Flag.WITH_BODY.equals(flag)) {
       SqlInfo sqlInfo =
           SqlInfo.builder()
-              .tableName(sqlIdentifier.getSimple())
+              .tableName(sqlIdentifier.getSimple() + "(res)")
               .level(level + 1)
               .uuid(uuid)
               .build();
@@ -421,6 +442,22 @@ public class ParseSql {
         uuid,
         lastInfoOpt.get().getTableName(),
         lastInfoOpt.get().getTableAlias());
+  }
+
+  // 查找上一个表的 with 所有记录
+  private List<SqlInfo> findLastInfoWithALL(Table<SqlInfo> table, String uuid) {
+    Optional<SqlInfo> lastInfoOpt = findLastInfo(table, uuid);
+    return table.selectWhere(
+        "uuid,tableName,tableAlias,withFlag",
+        uuid,
+        lastInfoOpt.get().getTableName(),
+        lastInfoOpt.get().getTableAlias(),
+        true);
+  }
+
+  private void updateWithFlag(Table<SqlInfo> table, String uuid) {
+    table.updateWhere(
+        "uuid,withFlag", new Object[] {uuid, true}, "uuid,withFlag", new Object[] {uuid, null});
   }
 
   public static void main(String[] args) {
