@@ -88,8 +88,10 @@ public class ParseSql {
                   .replace("$top", lastTop + "")
                   .replace("$left", lastLeft + "");
           if (lastLevel == info.getLevel()) {
-            lastTop = 100;
+            lastTop += 200;
           } else {
+            lastLevel = info.getLevel();
+            lastTop = -100;
             lastLeft += 150;
           }
           if (info.getLevel() == 2) {
