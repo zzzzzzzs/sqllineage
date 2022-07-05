@@ -6,6 +6,8 @@ import lombok.Data;
 import lombok.ToString;
 import lombok.experimental.Accessors;
 
+import java.util.List;
+
 /**
  * Sql Info
  *
@@ -26,6 +28,9 @@ public class SqlInfo {
 
   // 用来标记 with 语句中的列名
   Boolean withFlag;
+
+  // 引用的表名
+  List<String> quoTable;
 
   // 唯一标识符
   String uuid;
