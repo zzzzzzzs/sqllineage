@@ -31,7 +31,6 @@ from (
 
 <details>   
 <summary>graphviz</summary>   
-
 ![Alt text](https://g.gravizo.com/g?
 digraph G {
     node [shape=box];
