@@ -8,34 +8,29 @@
 
 例如，在文本框输入下面的 sql 语句
 ```sql
-select a.ca_state state, count(*) cnt
-from customer_address a
-   , customer c
-   , store_sales s
-   , date_dim d
-   , item i
-where a.ca_address_sk = c.c_current_addr_sk
-  and c.c_customer_sk = s.ss_customer_sk
-  and s.ss_sold_date_sk = d.d_date_sk
-  and s.ss_item_sk = i.i_item_sk
-  and d.d_month_seq =
-      (select distinct (d_month_seq)
-       from date_dim
-       where d_year = 2001
-         and d_moy = 1)
-  and i.i_current_price > 1.2 *
-                          (select avg(j.i_current_price)
-                           from item j
-                           where j.i_category = i.i_category)
-group by a.ca_state
-having count(*) >= 10
-order by cnt
-limit 100;
+select age, name
+from (
+         select age, name, class
+         from (
+                  select age, name, class, grade
+                  from (
+                           select age, name, class, grade, gender
+                           from data1
+                       ) t1
+              ) t2
+     ) t3;
 ```
+
+展示如下图：
+
+![image-20220714213353309](assets/image-20220714213353309.png)
 
 # 解析过程
 
-Binary tree
+类似于二叉树
+
+<details>   
+<summary>graphviz</summary>   
 
 ![Alt text](https://g.gravizo.com/g?
 digraph G {
@@ -65,37 +60,19 @@ digraph G {
     Right->SqlBasicCallE
 }
 )
+</details>
 
 
 
-# 有限状态机
-
-<details>   <summary>折叠文本</summary>   此处可书写文本   嗯，是可以书写文本的 </details>
 
 
-![Alt text](https://g.gravizo.com/g?
-digraph G {
-    rankdir = TB;
-    size = "8,5"
-    node [shape = box];
-    INIT [label="INITIAL"];
-    TABLE [label="TABLE"];
-    JOIN [label="JOIN"];
-    REAL [label="REAL"];
-    REST [label="REST"];
-    RESC [label="RESC"];
-    INIT -> TABLE [ label = "table"];
-    TABLE -> REST [ label = "real"];
-    TABLE -> REAL [ label = "real"];
-    REAL -> REST [ label = "as"];
-    TABLE -> JOIN [ label = "join"];
-    JOIN -> REST [ label = "real"];
-    INIT -> COLUMN [ label = "column"]
-    COLUMN -> RESC [label = "real"]
-    COLUMN -> REAL [label = "real"]
-    REAL -> RESC [label = "as"]
-}
-)
+
+
+![image-20220714214353035](assets/image-20220714214353035.png)
+
+# 测试网址
+
+http://106.14.150.229:8080/
 
 
 # 注意

@@ -1,11 +1,12 @@
 package com.zzzzzzzs.sqllineage.controller;
 
 import com.zzzzzzzs.sqllineage.core.ParseSql;
-import org.apache.calcite.sql.parser.SqlParseException;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
+@CrossOrigin
 @RestController
 @RequestMapping(value = "/parse")
 public class ParseController {

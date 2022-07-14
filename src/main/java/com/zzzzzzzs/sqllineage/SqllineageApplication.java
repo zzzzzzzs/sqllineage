@@ -2,9 +2,8 @@ package com.zzzzzzzs.sqllineage;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-// http://localhost:9000/swagger-ui.html#/
-// http://localhost:9000/doc.html#/
-// http://localhost:9000/h2-console
+// http://localhost:9000/api/swagger-ui.html#/
+// http://localhost:9000/api/doc.html#/
 @SpringBootApplication
 public class SqllineageApplication {
 
